@@ -1,0 +1,17 @@
+; -*- mode: emacs-lisp; lexical-binding: t; no-byte-compile: t -*-
+
+(eldev-require-version "0.6")
+
+(eldev-use-package-archive 'gnu)
+(eldev-use-package-archive 'melpa-unstable)
+
+(eldev-use-plugin 'autoloads)
+
+;; CIDER cannot be compiled otherwise.
+(setf eldev-build-load-before-byte-compiling t)
+
+(setf eldev-lint-default '(elisp))
+(with-eval-after-load 'elisp-lint
+  ;; We will byte-compile with Eldev.
+  (setf elisp-lint-ignored-validators '("package-lint" "fill-column" "byte-compile")
+        enable-local-variables        :safe))

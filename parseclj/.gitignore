@@ -1,0 +1,4 @@
+.cask
+*.elc
+/.eldev
+/parseclj-autoloads.el
