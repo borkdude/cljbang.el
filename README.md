@@ -189,6 +189,14 @@ Warning (cljbang): magti/status resolves to magti-status, which is not defined
 
 `cljbang-warn-unresolved` turns that off.
 
+Munging is not reversible: `(ns a-b)` with `c` and `(ns a)` with `b-c`
+both intern `a-b-c`. The second definition warns before replacing the
+first:
+
+```
+Warning (cljbang): a/b-c interns a-b-c, already a-b/c
+```
+
 ## Interop
 
 Any name cljbang does not define compiles to a plain elisp call:
@@ -226,23 +234,40 @@ def defn defn- defmacro fn let loop recur set! if do try ns require quote commen
 ```
 
 Clojure treats only `def`, `if`, `do`, `set!`, `quote`, `try`, `loop` and
-`recur` as special. The
-rest are macros there, and could become macros here too once there is a
-syntax quote to write them with.
+`recur` as special. The rest are macros there, and could become macros
+here too.
 
 ### Macros
 
-Cljbang has no syntax quote yet, so build macros
-using `list` and `cons`:
+Build a macro with a syntax quote, unquoting with `~` and `~@`:
 
 ```clojure
-(defmacro twice [x] (list '+ x x))
-(twice 3)                                  ;; => 6
-
-(defmacro unless-neg [n body]
-  (list 'if (list '< n 0) nil body))
-(unless-neg 5 :ok)                         ;; => :ok
+(defmacro unless [test & body]
+  `(if ~test nil (do ~@body)))
+(unless false :ok)                         ;; => :ok
 ```
+
+A syntax quote resolves unqualified names in the macro's namespace,
+including vars defined later. Use `el/` for Emacs Lisp names:
+
+```clojure
+(ns my.config)
+(defmacro shout [x] `(el/upcase (greet ~x)))   ;; greet is my-config-greet
+(defn greet [x] (str "hello " x))              ;; defined after the macro
+```
+
+Each name ending in `#` gets one fresh symbol per template, so a binding
+the macro introduces cannot capture one at the call site:
+
+```clojure
+(defmacro my-or [a b]
+  `(let [v# ~a] (if v# v# ~b)))
+(let [v 5] (my-or nil v))                  ;; => 5
+```
+
+A `#(...)` in a template is an error, since its `%` would be qualified
+like any other name. Write `(fn [x#] ...)`. Building an expansion with
+`list` and `cons` still works.
 
 These ship as macros rather than compiler support:
 
@@ -349,8 +374,9 @@ Lisp semantics:
                        ;;    both sequences and maps
 ```
 
-Inside `clj!` there is no source text to rewrite, so use `hash-set` and
-`fn`, or move the code to a `.clj` file:
+These reader forms need source rewriting and do not work inside `clj!`:
+`#{}`, `#()`, `#""`, `` ` ``, `~`, `~@` and `@`. Use `hash-set`, `fn`,
+`re-pattern`, `list` and `deref`, or move the code to a `.clj` file:
 
 ```clojure
 (clj! #{1 2})       ;; read error
@@ -359,7 +385,7 @@ Inside `clj!` there is no source text to rewrite, so use `hash-set` and
 
 Not implemented:
 
-- Syntax quote. Macros must build expansions with `list` and `cons`.
+- A syntax quote inside a syntax quote.
 - `:strs`, `:syms` and namespaced `:keys` destructuring.
 - The `:while` modifier in `doseq`.
 - Protocols and multimethods.

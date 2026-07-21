@@ -53,6 +53,19 @@
 (defun cljbang--ns-var-table (&optional ns)
   (plist-get (cljbang--ns-entry ns) :vars))
 
+;; Munging is not reversible: (ns a-b) with c and (ns a) with b-c both
+;; intern a-b-c.  An index of what each symbol was interned as makes the
+;; second definition warn rather than replace the first in silence.
+
+(defun cljbang--interned-table ()
+  "Interned symbol -> the (NAMESPACE . NAME) it was interned as."
+  (or (gethash :interned cljbang--ns-state)
+      (puthash :interned (make-hash-table :test #'eq) cljbang--ns-state)))
+
+(defun cljbang--interned-as (sym)
+  "The (NAMESPACE . NAME) SYM was interned as, or nil."
+  (gethash sym (cljbang--interned-table)))
+
 (defmacro cljbang--with-ns (ns &rest body)
   "Run BODY with NS as the current namespace, restoring it afterwards."
   (declare (indent 1))

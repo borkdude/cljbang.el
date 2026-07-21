@@ -84,6 +84,16 @@
 ;; ns-name with dots as dashes.  The munge doubles as interop:
 ;; (magit/status) calls elisp `magit-status'.
 
+(defconst cljbang--core-macros
+  '((when . cljbang-core-when) (cond . cljbang-core-cond)
+    (case . cljbang-core-case) (if-let . cljbang-core-if-let)
+    (when-let . cljbang-core-when-let) (doseq . cljbang-core-doseq)
+    (dotimes . cljbang-core-dotimes) (-> . cljbang-core->)
+    (->> . cljbang-core->>) (some-> . cljbang-core-some->)
+    (some->> . cljbang-core-some->>) (with-out-str . cljbang-core-with-out-str)
+    (time . cljbang-core-time))
+  "Clojure name -> the elisp symbol a macro cljbang ships is interned as.")
+
 (defconst cljbang--ns-default-aliases
   '((str . "clojure.string")))
 
@@ -97,11 +107,6 @@
 ;; The namespace in effect, the aliases it declared and the vars it
 ;; defined all live in `cljbang--ns-state', which cljbang-core.el owns
 ;; because a compiled file sets the namespace when it loads.
-
-(defvar cljbang--macros (make-hash-table :test #'equal)
-  "Macro name -> expander function.
-Registered while compiling, so a later form in the same file can use a
-macro defined above it, as the var table does for defn.")
 
 (defvar cljbang--expanding 0
   "Depth of macro expansion, to catch a macro that expands to itself.")
@@ -192,9 +197,17 @@ actually defined under it, so a typo is still an error."
   "Munged elisp symbol for NAME in the current ns; records the var.
 PRIVATE gives the double dash elisp uses for internal names."
   (if-let* ((ns (cljbang--current-ns)))
-      (let ((sym (intern (concat (cljbang--munge-ns ns)
-                                 (if private "--" "-")
-                                 (symbol-name name)))))
+      (let* ((sym (intern (concat (cljbang--munge-ns ns)
+                                  (if private "--" "-")
+                                  (symbol-name name))))
+             (prev (cljbang--interned-as sym))
+             (here (cons ns (symbol-name name))))
+        (when (and prev (not (equal prev here)))
+          (display-warning 'cljbang
+                           (format "%s/%s interns %s, already %s/%s"
+                                   ns name sym (car prev) (cdr prev))
+                           :warning))
+        (puthash sym here (cljbang--interned-table))
         ;; store the symbol, so resolving does not have to guess which
         ;; spelling this var was defined with
         (puthash (symbol-name name) sym (cljbang--ns-var-table))
@@ -210,12 +223,6 @@ PRIVATE gives the double dash elisp uses for internal names."
 ;; after it is an elisp symbol taken verbatim.  It escapes ns munging
 ;; (el/my/flymake-inline-ov keeps its slash) and the cljbang--core-fns
 ;; overrides, so elisp's own get, assoc, + ... stay reachable.
-
-(defun cljbang--register-macro (name ns expander)
-  "Register EXPANDER as the macro NAME, in NS when there is one."
-  (puthash name expander cljbang--macros)
-  (when ns (puthash (concat ns "/" name) expander cljbang--macros))
-  nil)
 
 (defun cljbang--spec-parts (spec)
   "SPEC as a list, whatever shape a require wrote it in."
@@ -246,19 +253,6 @@ names a namespace without loading it as in Clojure."
                       (when-let* ((alias (cljbang--spec-alias spec)))
                         `(cljbang--ns-add-alias ',(car alias) ,(cdr alias))))
                     specs)))
-
-(defun cljbang--macro-function (sym)
-  "Expander registered for SYM, plain or namespace qualified, or nil."
-  (let ((name (symbol-name sym))
-        (current (cljbang--current-ns)))
-    (or (and current
-             (gethash (concat current "/" name) cljbang--macros))
-        (gethash name cljbang--macros)
-        (when (string-search "/" name)
-          (pcase-let ((`(,ns ,n) (split-string name "/")))
-            (gethash (concat (or (cdr (assq (intern ns) (cljbang--ns-aliases))) ns)
-                             "/" n)
-                     cljbang--macros))))))
 
 (defun cljbang--el-symbol (sym)
   "Elisp symbol named by an el/ qualified SYM, or nil."
@@ -522,6 +516,105 @@ key is the pattern and the value is the map key to look up."
          ,@(cljbang--compile-recur-body (remq '&rest arglist)
                                         (nreverse pairs) body env*)))))
 
+;; A syntax quote builds the form rather than quoting it: every part is
+;; quoted except what an unquote marks.  A trailing # gives one gensym per
+;; name per template, which is what keeps a macro from capturing a binding.
+
+(defun cljbang--auto-gensym (sym gensyms)
+  "Gensym for SYM, a name ending in #, the same one throughout GENSYMS."
+  (let ((name (symbol-name sym)))
+    (or (gethash name gensyms)
+        (puthash name
+                 (gensym (concat (substring name 0 -1) "-"))
+                 gensyms))))
+
+(defconst cljbang--template-bare
+  '(& cljbang--map-literal cljbang--set-literal)
+  "Names a template leaves alone, as Clojure leaves & alone.")
+
+(defun cljbang--template-qualified (sym)
+  "SYM with its alias expanded, still qualified.
+el/ and a name already spelled in full are left alone."
+  (let ((parts (split-string (symbol-name sym) "/")))
+    (if (or (cljbang--el-symbol sym) (not (= (length parts) 2)))
+        sym
+      (pcase-let ((`(,ns ,n) parts))
+        (if-let* ((full (or (cdr (assq (intern ns) (cljbang--ns-aliases)))
+                            (cdr (assq (intern ns) cljbang--ns-default-aliases)))))
+            (intern (concat full "/" n))
+          sym)))))
+
+(defun cljbang--template-symbol (sym)
+  "SYM as a template should carry it.
+A macro expands wherever it is called, so an unqualified name is
+qualified to the namespace it was written in, whether or not the var
+exists yet.  A qualified name keeps its shape, and what cljbang defines
+resolves to what it names, so nothing at the call site can take its
+place.  Special forms are matched before anything is resolved, so they
+stay as they are."
+  (let ((name (symbol-name sym)))
+    (cond
+     ((memq sym cljbang--template-bare) sym)
+     ((member name cljbang--special-forms) sym)
+     ((string-search "/" name) (cljbang--template-qualified sym))
+     ;; the defined var knows whether defn- spelled it private
+     ((cljbang--ns-resolve sym))
+     ;; resolved, or a name of its own at the call site would take it
+     ((alist-get sym cljbang--core-fns))
+     ((alist-get sym cljbang--core-macros))
+     ;; a macro defined outside any namespace is already its own name
+     ((cljbang--macro-function sym) sym)
+     ((cljbang--current-ns)
+      (intern (concat (cljbang--munge-ns (cljbang--current-ns)) "-" name)))
+     (t sym))))
+
+(defun cljbang--template (form gensyms)
+  "Cljbang form that builds FORM, honouring unquote.  GENSYMS holds x# names."
+  (when (and (consp form) (memq (car form) '(\` \, \,@ cljbang--syntax-quote)))
+    (error "cljbang: a nested syntax quote is not supported"))
+  (pcase form
+    (`(cljbang--unquote ,x) x)
+    (`(cljbang--unquote-splicing ,_)
+     (error "cljbang: ~@ only makes sense inside a collection"))
+    ((pred keywordp) form)
+    ((pred symbolp)
+     (cond ((null form) nil)
+           ((memq form '(t true false)) form)
+           ((string-suffix-p "#" (symbol-name form))
+            (list 'quote (cljbang--auto-gensym form gensyms)))
+           (t (list 'quote (cljbang--template-symbol form)))))
+    ((pred vectorp)
+     (list 'vec (cljbang--template-seq (append form nil) gensyms)))
+    (`(cljbang--fn-literal . ,_)
+     (error "cljbang: #() inside a syntax quote does not work, use (fn [x#] ...)"))
+    (`(cljbang--map-literal . ,kvs)
+     (list 'apply 'hash-map (cljbang--template-seq kvs gensyms)))
+    (`(cljbang--set-literal . ,xs)
+     (list 'apply 'hash-set (cljbang--template-seq xs gensyms)))
+    ((pred consp) (cljbang--template-seq form gensyms))
+    (_ form)))
+
+(defun cljbang--template-seq (forms gensyms)
+  "Cljbang form building the list FORMS, splicing where ~@ says to."
+  (let (parts run spliced)
+    (dolist (f forms)
+      (pcase f
+        (`(cljbang--unquote-splicing ,x)
+         (when run (push (cons 'list (nreverse run)) parts) (setq run nil))
+         (setq spliced t)
+         (push x parts))
+        (_ (push (cljbang--template f gensyms) run))))
+    (when run (push (cons 'list (nreverse run)) parts))
+    (setq parts (nreverse parts))
+    (cond ((null parts) nil)
+          ;; concat even for one part when it was spliced in, since what
+          ;; was spliced may be a vector and the result is a list
+          ((and (null (cdr parts)) (not spliced)) (car parts))
+          (t (cons 'concat parts)))))
+
+(defun cljbang--compile-syntax-quote (form env)
+  (cljbang-compile (cljbang--template form (make-hash-table :test #'equal)) env))
+
 (defun cljbang--compile-let (bindings body env)
   (let (pairs (env* env))
     (cl-loop for (pattern val) on (append bindings nil) by #'cddr
@@ -721,19 +814,46 @@ Returns a list of forms, looping when a recur asks for it."
         ((cljbang--qualified sym))
         (t sym)))
 
+;; A macro is interned like a var, so it is namespaced by the same munge
+;; and a macro of one namespace cannot be seen from another.  The expander
+;; hangs off the symbol rather than its function cell, since it takes and
+;; returns cljbang forms rather than elisp ones.
+
+(defun cljbang--register-macro (sym expander)
+  "Register EXPANDER as the macro named by the elisp symbol SYM."
+  (put sym 'cljbang-macro expander)
+  nil)
+
+(defun cljbang--macro-function (sym)
+  "Expander for SYM, resolved as any other name is, or nil.
+Resolving first lets a macro of the namespace shadow one cljbang ships.
+The bare symbol comes last, which finds one defined outside any namespace."
+  (get (or (cljbang--resolve-name sym)
+           (alist-get sym cljbang--core-macros)
+           sym)
+       'cljbang-macro))
+
+(defun cljbang--resolve-name (sym)
+  "The elisp symbol SYM names, or nil when nothing here names one.
+Clojure's resolve, over elisp's flat symbols: el/ gives a host name, a
+qualified one goes through the aliases, and a bare one is a var of the
+current namespace or a core function.  A special form resolves to
+nothing, as it does in Clojure, and so does a name cljbang never saw."
+  (or (cljbang--el-symbol sym)
+      (cljbang--qualified sym)
+      (cljbang--ns-resolve sym)
+      (alist-get sym cljbang--core-fns)))
+
 (defun cljbang--compile-symbol (form env)
   "Compile FORM in value position."
   (cond ((memq form env) form)
-        ;; el/ names a var as readily as a function, so resolve it the
-        ;; lisp-1 way rather than assuming #'
-        ((cljbang--el-symbol form)
-         `(cljbang--resolve ',(cljbang--el-symbol form)))
-        ;; a qualified name may be a def as readily as a defn, so resolve
-        ;; it the lisp-1 way rather than assuming #'
-        ((cljbang--qualified form)
-         `(cljbang--resolve ',(cljbang--qualified form)))
-        ((cljbang--ns-resolve form)
-         `(cljbang--resolve ',(cljbang--ns-resolve form)))
+        ;; a name may be a def as readily as a defn, so resolve it the
+        ;; lisp-1 way rather than assuming #', which a core function can
+        ;; take since it is always a function
+        ((or (cljbang--el-symbol form)
+             (cljbang--qualified form)
+             (cljbang--ns-resolve form))
+         `(cljbang--resolve ',(cljbang--resolve-name form)))
         ((alist-get form cljbang--core-fns)
          `#',(alist-get form cljbang--core-fns))
         (t `(cljbang--resolve ',form))))
@@ -747,14 +867,7 @@ magti/status without complaining about magit/status."
 
 (defun cljbang--interned-here-p (sym)
   "Whether SYM is a var cljbang interned, which may not be evaluated yet."
-  (catch 'cljbang--found
-    (maphash (lambda (key entry)
-               (unless (eq key :current)
-                 (maphash (lambda (_name s)
-                            (when (eq s sym) (throw 'cljbang--found t)))
-                          (plist-get entry :vars))))
-             cljbang--ns-state)
-    nil))
+  (and (cljbang--interned-as sym) t))
 
 (defun cljbang--warn-unresolved (sym original)
   "Warn that ORIGINAL resolved to SYM, which nothing defines."
@@ -814,6 +927,10 @@ magti/status without complaining about magit/status."
       ('cljbang--set-literal
        `(cljbang-hash-set ,@(cljbang--compile-body (cdr form) env)))
       ('cljbang--fn-literal (cljbang--compile-fn-literal (cdr form) env))
+      ('cljbang--syntax-quote (cljbang--compile-syntax-quote (cadr form) env))
+      ((or 'cljbang--unquote 'cljbang--unquote-splicing)
+       (error "cljbang: %s outside of a syntax quote"
+              (if (eq (car form) 'cljbang--unquote) "~" "~@")))
       ('quote form)
       ('comment nil)
       ('require
@@ -864,11 +981,8 @@ magti/status without complaining about magit/status."
                     (fn (cljbang--compile-fn tail env)))
          ;; registered now, so the rest of this file can use it, and
          ;; emitted too, so a compiled file registers it again on load
-         (cljbang--register-macro (symbol-name name) (cljbang--current-ns)
-                                  (eval fn t))
-         `(progn (cljbang--register-macro ,(symbol-name name)
-                                          ,(cljbang--current-ns) ,fn)
-                 ',name*)))
+         (cljbang--register-macro name* (eval fn t))
+         `(progn (put ',name* 'cljbang-macro ,fn) ',name*)))
       ((or 'defn 'defn-)
        (pcase-let* ((`(,name . ,rest) (cdr form))
                     (`(,doc ,tail) (cljbang--split-docstring rest))
@@ -926,50 +1040,98 @@ magti/status without complaining about magit/status."
     ("#(" . "(cljbang--fn-literal "))
   "Reader dispatch forms, and the text the elisp reader accepts instead.")
 
+(defun cljbang--code-position-p (pos)
+  "Whether POS is code rather than inside a string or a comment."
+  (let ((state (save-excursion (syntax-ppss pos))))
+    (not (or (nth 3 state) (nth 4 state)))))
+
+(defun cljbang--escape-auto-gensyms ()
+  "Escape the # ending an auto gensym name in the current buffer.
+The elisp reader opens a dispatch on #, so x# has to reach it as x\\#.
+Done before anything scans a sexp, so x# counts as the one symbol it is."
+  (let (spots)
+    (goto-char (point-min))
+    (while (search-forward "#" nil t)
+      (let ((beg (match-beginning 0)))
+        (when (and (cljbang--code-position-p beg)
+                   (> beg (point-min))
+                   ;; inside a name, and ending it
+                   (not (memq (char-before beg)
+                              '(?\s ?\t ?\n ?\( ?\[ ?{ ?\) ?\] ?} ?# ?\' ?` ?~ ?@ ?, ?\")))
+                   (memq (char-after (1+ beg))
+                         '(?\s ?\t ?\n ?\) ?\] ?} nil)))
+          (push beg spots))))
+    ;; latest first, so the earlier positions stay valid
+    (dolist (beg spots)
+      (goto-char beg)
+      (insert "\\"))))
+
+(defun cljbang--wrap-next-sexp (prefix opener edits &optional sexp-at token-start
+                                       not-before)
+  "Add edits to EDITS wrapping the sexp after each PREFIX in OPENER.
+SEXP-AT is where the sexp starts relative to PREFIX, its length by
+default.  TOKEN-START limits the match to a prefix that opens a token,
+which @ needs because an elisp symbol may contain one.  NOT-BEFORE skips
+a match followed by that character, which is how ~ leaves ~@ alone."
+  (let ((skip (or sexp-at (length prefix))))
+    (goto-char (point-min))
+    (while (search-forward prefix nil t)
+      ;; syntax-ppss moves point, so keep the search position
+      (let ((beg (match-beginning 0)))
+        (when (and (cljbang--code-position-p beg)
+                   (not (and not-before
+                             (eq (char-after (+ beg (length prefix))) not-before)))
+                   (or (not token-start)
+                       (= beg (point-min))
+                       ;; a quote opens a token as readily as a delimiter
+                       ;; does, which is what `@x needs.  Not ~, whose @
+                       ;; belongs to the splice that was matched already
+                       (memq (char-before beg)
+                             '(?\s ?\t ?\n ?\( ?\[ ?{ ?` ?\'))))
+          (goto-char (+ beg skip))
+          (when-let* ((end (ignore-errors
+                             (save-excursion (forward-sexp) (point)))))
+            (push (list end 0 ")") edits)
+            (push (list beg (length prefix) opener) edits)
+            (goto-char end)))))
+    edits))
+
 (defun cljbang--rewrite-dispatch (s)
-  "Rewrite #{ and #( in S to forms the elisp reader accepts.
-Occurrences inside a string are left alone.  Needs the source text, so
-it applies to files and inline evaluation but not to `clj!'."
+  "Rewrite the reader macros in S to forms the elisp reader accepts.
+Occurrences inside a string or a comment are left alone.  Needs the
+source text, so it applies to files and inline evaluation but not to
+`clj!'."
   (with-temp-buffer
     (insert s)
     (let ((table (make-syntax-table)))
       (modify-syntax-entry ?\" "\"" table)
       (modify-syntax-entry ?\\ "\\" table)
+      (modify-syntax-entry ?\; "<" table)
+      (modify-syntax-entry ?\n ">" table)
+      ;; braces are delimiters here, so scanning a sexp spans a map, even
+      ;; though the elisp reader itself will need them spliced apart
+      (modify-syntax-entry ?{ "(}" table)
+      (modify-syntax-entry ?} "){" table)
       (set-syntax-table table))
+    (cljbang--escape-auto-gensyms)
     (let (edits)
       (pcase-dolist (`(,find . ,replace) cljbang--dispatch-rewrites)
         (goto-char (point-min))
         (while (search-forward find nil t)
-          ;; syntax-ppss moves point, so keep the search position
           (let ((beg (match-beginning 0)))
-            (unless (save-excursion (nth 3 (syntax-ppss beg)))
+            (when (cljbang--code-position-p beg)
               (push (list beg (length find) replace) edits))
             (goto-char (+ beg (length find))))))
-      ;; #"..." needs a closing paren after the string, so it takes two
-      ;; edits and has to find where the string ends
-      (goto-char (point-min))
-      (while (search-forward "#\"" nil t)
-        (let ((beg (match-beginning 0)))
-          (unless (save-excursion (nth 3 (syntax-ppss beg)))
-            (goto-char (1+ beg))              ; on the opening quote
-            (let ((end (save-excursion (forward-sexp) (point))))
-              (push (list end 0 ")") edits)
-              (push (list beg 2 "(cljbang-re-pattern \"") edits)
-              (goto-char end)))))
-      ;; @x is a deref of the sexp after it, so it takes two edits as well.
-      ;; Only at the start of a token, since an elisp symbol may contain @.
-      (goto-char (point-min))
-      (while (search-forward "@" nil t)
-        (let ((beg (match-beginning 0)))
-          (when (and (not (save-excursion (nth 3 (syntax-ppss beg))))
-                     (or (= beg (point-min))
-                         (memq (char-before beg) '(?\s ?\t ?\n ?\( ?\[ ?{))))
-            (goto-char (1+ beg))
-            (when-let* ((end (ignore-errors
-                               (save-excursion (forward-sexp) (point)))))
-              (push (list end 0 ")") edits)
-              (push (list beg 1 "(cljbang-deref ") edits)
-              (goto-char end)))))
+      ;; each of these takes two edits, an opener and a closing paren that
+      ;; has to be found by scanning the sexp the reader macro applies to.
+      ;; ~@ goes before ~, so the longer one wins the shared tilde.
+      ;; el/ so that what the reader emits reaches the host function even
+      ;; where a var of that name is defined
+      (setq edits (cljbang--wrap-next-sexp "#\"" "(el/cljbang-re-pattern \"" edits 1))
+      (setq edits (cljbang--wrap-next-sexp "`" "(cljbang--syntax-quote " edits))
+      (setq edits (cljbang--wrap-next-sexp "~@" "(cljbang--unquote-splicing " edits))
+      (setq edits (cljbang--wrap-next-sexp "~" "(cljbang--unquote " edits nil nil ?@))
+      (setq edits (cljbang--wrap-next-sexp "@" "(el/cljbang-deref " edits nil t))
       ;; latest position first, so the earlier ones stay valid
       (pcase-dolist (`(,pos ,len ,replace)
                      (sort edits (lambda (a b) (> (car a) (car b)))))
@@ -1165,11 +1327,11 @@ happens once unless RELOAD is non-nil."
 ;; neither of these needs compiler support, they are just macros.  The
 ;; expansion is cljbang code, so it goes through the compiler in turn.
 (cljbang--register-macro
- "->" nil
+ 'cljbang-core->
  (lambda (init &rest forms) (cljbang--thread init forms t)))
 
 (cljbang--register-macro
- "->>" nil
+ 'cljbang-core->>
  (lambda (init &rest forms) (cljbang--thread init forms nil)))
 
 ;; the constants are not evaluated, so they are quoted into the test.  A
@@ -1202,23 +1364,23 @@ happens once unless RELOAD is non-nil."
                                                     :value val))))))))))
 
 (cljbang--register-macro
- "case" nil
+ 'cljbang-core-case
  (lambda (expr &rest clauses) (cljbang--case expr clauses)))
 
 (cljbang--register-macro
- "some->" nil
+ 'cljbang-core-some->
  (lambda (init &rest forms) (cljbang--some-thread init forms t)))
 
 (cljbang--register-macro
- "some->>" nil
+ 'cljbang-core-some->>
  (lambda (init &rest forms) (cljbang--some-thread init forms nil)))
 
 (cljbang--register-macro
- "when" nil
+ 'cljbang-core-when
  (lambda (test &rest body) (list 'if test (cons 'do body))))
 
 (cljbang--register-macro
- "cond" nil
+ 'cljbang-core-cond
  (lambda (&rest clauses)
    (when (cl-oddp (length clauses))
      (error "cljbang: cond needs an even number of forms"))
@@ -1244,11 +1406,11 @@ happens once unless RELOAD is non-nil."
                 else))))
 
 (cljbang--register-macro
- "if-let" nil
+ 'cljbang-core-if-let
  (lambda (binding then &optional else) (cljbang--if-let binding then else)))
 
 (cljbang--register-macro
- "when-let" nil
+ 'cljbang-core-when-let
  (lambda (binding &rest body) (cljbang--if-let binding (cons 'do body) nil)))
 
 ;; seq-do rather than dolist, since the binding is a cljbang pattern and
@@ -1297,19 +1459,19 @@ happens once unless RELOAD is non-nil."
           nil)))
 
 (cljbang--register-macro
- "doseq" nil
+ 'cljbang-core-doseq
  (lambda (bindings &rest body) (cljbang--doseq bindings body)))
 
 (cljbang--register-macro
- "dotimes" nil
+ 'cljbang-core-dotimes
  (lambda (binding &rest body) (cljbang--dotimes binding body)))
 
 (cljbang--register-macro
- "with-out-str" nil
+ 'cljbang-core-with-out-str
  (lambda (&rest body) (cons 'el/with-output-to-string body)))
 
 (cljbang--register-macro
- "time" nil
+ 'cljbang-core-time
  (lambda (expr)
    (let ((start (gensym "cljbang-start-"))
          (val (gensym "cljbang-val-")))

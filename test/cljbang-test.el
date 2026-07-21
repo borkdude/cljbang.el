@@ -338,6 +338,215 @@ keywords."
   ;; a map parameter wants a cljbang map, not an alist
   (should (= 7 (ce-destructured (cljbang-hash-map :a 7)))))
 
+;;; Syntax quote
+
+(ert-deftest cljbang-test-syntax-quote ()
+  (should (equal '(a b c) (cljbang-test--eval "`(a b c)")))
+  (should (equal '(a 1) (cljbang-test--eval "(let [x 1] `(a ~x))")))
+  (should (= 5 (cljbang-test--eval "(let [x 5] `~x)")))
+  (should (equal '(a 3) (cljbang-test--eval "`(a ~(+ 1 2))")))
+  (should (null (cljbang-test--eval "`()"))))
+
+(ert-deftest cljbang-test-syntax-quote-splices ()
+  (should (equal '(a 1 2 b) (cljbang-test--eval "(let [xs [1 2]] `(a ~@xs b))")))
+  (should (equal [1 2 3] (cljbang-test--eval "(let [xs [1 2]] `[~@xs 3])")))
+  (should (equal '(1 2) (cljbang-test--eval "(let [xs [1 2]] `(~@xs))")))
+  (should (equal '(a) (cljbang-test--eval "(let [xs []] `(a ~@xs))"))))
+
+(ert-deftest cljbang-test-syntax-quote-over-collections ()
+  (cljbang--set-current-ns nil)
+  (should (equal [a 1] (cljbang-test--eval "(let [x 1] `[a ~x])")))
+  (should (= 1 (cljbang-test--eval "(let [x 1] (get `{:a ~x} :a))")))
+  (should (= 2 (cljbang-test--eval "(count `#{1 2})")))
+  (should (equal '(a (b (c 2))) (cljbang-test--eval "`(a (b (c ~(+ 1 1))))"))))
+
+(ert-deftest cljbang-test-syntax-quote-qualifies-to-the-namespace ()
+  "A macro expands elsewhere, so an unqualified name settles here."
+  (cljbang-test--eval "(ns sqns) (defn thing [] :x)")
+  (should (eq 'sqns-thing (cljbang-test--eval "`thing")))
+  (cljbang--set-current-ns nil))
+
+(ert-deftest cljbang-test-syntax-quote-does-not-need-the-var-yet ()
+  "As in Clojure, where the var may be defined after the macro."
+  (cljbang-test--eval "(ns sqlater)")
+  (should (eq 'sqlater-not-yet (cljbang-test--eval "`not-yet")))
+  (cljbang--set-current-ns nil))
+
+(ert-deftest cljbang-test-syntax-quote-leaves-special-forms-bare ()
+  "The compiler matches these before it resolves anything, the way Clojure
+leaves if and do alone.  A var of that name cannot take one."
+  (cljbang-test--eval "(ns sqbare)")
+  (should (equal '(if a b) (cljbang-test--eval "`(if ~'a ~'b)")))
+  (should (eq 'let (cljbang-test--eval "`let")))
+  (should (equal '(fn [x] x) (cljbang-test--eval "`(fn [~'x] ~'x)")))
+  (cljbang--set-current-ns nil))
+
+(ert-deftest cljbang-test-syntax-quote-names-a-builtin-macro-outright ()
+  "As Clojure writes clojure.core/when, so a macro of that name elsewhere
+cannot take it."
+  (cljbang-test--eval "(ns sqmac)")
+  (should (eq 'cljbang-core-when (cljbang-test--eval "`when")))
+  (should (eq 'cljbang-core-> (cljbang-test--eval "`->")))
+  (should (equal '(cljbang-core-when t 1) (cljbang-test--eval "`(when true 1)")))
+  (should (eq :y (cljbang-test--eval "(cljbang-core-when true :y)")))
+  (cljbang--set-current-ns nil))
+
+(ert-deftest cljbang-test-a-builtin-macro-in-a-template-is-not-captured ()
+  (let ((dir (make-temp-file "cljbang-hij" t)))
+    (unwind-protect
+        (let ((cljbang-load-path (list dir)))
+          (write-region "(ns wlib)\n(defmacro guard [x] `(when ~x (inc ~x)))\n"
+                        nil (expand-file-name "wlib.clj" dir) nil 'quiet)
+          (write-region (concat "(ns wuser (:require [wlib :as w]))\n"
+                                "(defmacro when [tst & body] :hijacked)\n"
+                                "(defn go [] [(w/guard 1) (when true :mine)])\n")
+                        nil (expand-file-name "wuser.clj" dir) nil 'quiet)
+          (cljbang-load-file (expand-file-name "wlib.clj" dir))
+          (cljbang--set-current-ns nil)
+          (cljbang-load-file (expand-file-name "wuser.clj" dir))
+          ;; wlib keeps cljbang's when, wuser gets its own
+          (should (equal [2 :hijacked] (wuser-go))))
+      (delete-directory dir t)
+      (cljbang--set-current-ns nil))))
+
+(ert-deftest cljbang-test-syntax-quote-resolves-a-core-function ()
+  "A var of that name where the macro expands would otherwise take it."
+  (cljbang-test--eval "(ns sqcore)")
+  (should (eq '1+ (cljbang-test--eval "`inc")))
+  (should (eq 'cljbang-map (cljbang-test--eval "`map")))
+  (should (eq 'cljbang-str (cljbang-test--eval "`str")))
+  (should (equal '(cljbang-map 1+ [1]) (cljbang-test--eval "`(map inc [1])")))
+  (cljbang--set-current-ns nil))
+
+(ert-deftest cljbang-test-a-core-function-in-a-macro-is-not-captured ()
+  (let ((dir (make-temp-file "cljbang-cap" t)))
+    (unwind-protect
+        (let ((cljbang-load-path (list dir)))
+          (write-region "(ns caplib)\n(defmacro capbump [x] `(inc ~x))\n"
+                        nil (expand-file-name "caplib.clj" dir) nil 'quiet)
+          (write-region (concat "(ns capuser (:require [caplib :as c]))\n"
+                                "(defn inc [n] :captured)\n"
+                                "(defn go [] (c/capbump 1))\n")
+                        nil (expand-file-name "capuser.clj" dir) nil 'quiet)
+          (cljbang-load-file (expand-file-name "caplib.clj" dir))
+          (cljbang--set-current-ns nil)
+          (cljbang-load-file (expand-file-name "capuser.clj" dir))
+          (should (= 2 (capuser-go))))
+      (delete-directory dir t)
+      (cljbang--set-current-ns nil))))
+
+(ert-deftest cljbang-test-syntax-quote-keeps-parameter-syntax ()
+  (cljbang-test--eval "(ns sqamp)")
+  (should (eq '& (nth 1 (append (nth 1 (cljbang-test--eval "`(fn [a & b] a)")) nil))))
+  (cljbang--set-current-ns nil))
+
+(ert-deftest cljbang-test-syntax-quote-needs-el-for-a-host-name ()
+  "An unqualified name is a var of the namespace, so elisp needs el/."
+  (cljbang-test--eval "(ns sqhost)")
+  (should (eq 'sqhost-propertize (cljbang-test--eval "`propertize")))
+  ;; a qualified name stays qualified, as it does in Clojure
+  (should (equal '(el/message "hi") (cljbang-test--eval "`(el/message \"hi\")")))
+  (should (eq 'el/message (cljbang-test--eval "`el/message")))
+  (cljbang--set-current-ns nil))
+
+(ert-deftest cljbang-test-syntax-quote-expands-an-alias ()
+  "The alias becomes the namespace it names, and the name stays qualified."
+  (cljbang-test--eval "(ns sqalias)")
+  (should (eq 'clojure.string/join (cljbang-test--eval "`str/join")))
+  (should (equal "a,b" (cljbang-test--eval "(defmacro j [] `(str/join \",\" [\"a\" \"b\"])) (j)")))
+  (cljbang--set-current-ns nil))
+
+(ert-deftest cljbang-test-a-macro-expands-in-another-namespace ()
+  "The macro's own namespace is what its unqualified names must mean."
+  (let ((dir (make-temp-file "cljbang-sq" t)))
+    (unwind-protect
+        (let ((cljbang-load-path (list dir)))
+          (write-region (concat "(ns sqlib)\n"
+                                "(defn helper [x] (str \"helped \" x))\n"
+                                "(defmacro use-helper [x] `(helper ~x))\n")
+                        nil (expand-file-name "sqlib.clj" dir) nil 'quiet)
+          (write-region (concat "(ns squser (:require [sqlib :as a]))\n"
+                                "(defn go [] (a/use-helper \"u\"))\n")
+                        nil (expand-file-name "squser.clj" dir) nil 'quiet)
+          (cljbang-load-file (expand-file-name "sqlib.clj" dir))
+          (cljbang--set-current-ns nil)
+          (cljbang-load-file (expand-file-name "squser.clj" dir))
+          (should (equal "helped u" (squser-go))))
+      (delete-directory dir t)
+      (cljbang--set-current-ns nil))))
+
+(ert-deftest cljbang-test-auto-gensym ()
+  "x# is one fresh name per template, which is what stops capture."
+  (let ((form (cljbang-test--eval "`(let [x# 1] x#)")))
+    (should (eq (nth 0 form) 'let))
+    (should (eq (aref (nth 1 form) 0) (nth 2 form)))
+    (should-not (eq (aref (nth 1 form) 0) (intern "x#"))))
+  (should (not (equal (cljbang-test--eval "`x#") (cljbang-test--eval "`x#")))))
+
+(ert-deftest cljbang-test-macros-written-with-syntax-quote ()
+  (should (= 9 (cljbang-test--eval "(defmacro sq2 [x] `(* ~x ~x)) (sq2 (+ 1 2))")))
+  (should (= 2 (cljbang-test--eval
+                "(defmacro wh [t & body] `(if ~t (do ~@body) nil)) (wh true 1 2)")))
+  (should (equal [1 2] (cljbang-test--eval "(defmacro v2 [& xs] `[~@xs]) (v2 1 2)"))))
+
+(ert-deftest cljbang-test-auto-gensym-avoids-capture ()
+  (should (= 5 (cljbang-test--eval
+                "(defmacro my-or [a b] `(let [v# ~a] (if v# v# ~b)))
+                 (let [v 5] (my-or nil v))"))))
+
+(ert-deftest cljbang-test-unquote-outside-a-syntax-quote ()
+  (should-error (cljbang-test--eval "~x"))
+  (should-error (cljbang-test--eval "(list ~x)")))
+
+(ert-deftest cljbang-test-syntax-quote-keeps-what-the-reader-put-there ()
+  "The reader names the host function, so a template leaves it qualified."
+  (cljbang-test--eval "(ns sqreader)")
+  (should (equal '(el/cljbang-re-pattern "a+") (cljbang-test--eval "`#\"a+\"")))
+  (should (equal "aaa" (cljbang-test--eval
+                        "(defmacro pat [] `(re-find #\"a+\" \"baaa\")) (pat)")))
+  (should (equal '(el/cljbang-deref sqreader-x) (cljbang-test--eval "`@x")))
+  (should (= 7 (cljbang-test--eval
+                "(defmacro getv [x] `@~x) (let [a (atom 7)] (getv a))")))
+  (cljbang--set-current-ns nil))
+
+(ert-deftest cljbang-test-a-reader-form-cannot-be-captured ()
+  "A var named like the function a reader macro emits must not take it."
+  (should (equal "aaa" (cljbang-test--eval
+                        "(ns capr1) (defn cljbang-re-pattern [x] :captured)
+                         (re-find #\"a+\" \"baaa\")")))
+  (cljbang--set-current-ns nil)
+  (should (= 1 (cljbang-test--eval
+                "(ns capr2) (defn cljbang-deref [x] :captured)
+                 (let [a (atom 1)] @a)")))
+  (cljbang--set-current-ns nil)
+  (should (= 1 (cljbang-test--eval
+                "(ns capr3) (defmacro d [x] `@~x) (defn cljbang-deref [x] :captured)
+                 (let [a (atom 1)] (d a))")))
+  (cljbang--set-current-ns nil))
+
+(ert-deftest cljbang-test-fn-literal-in-a-template-is-refused ()
+  "Its % parameters cannot survive being qualified, so say so."
+  (cljbang-test--eval "(ns sqfnlit)")
+  (should-error (cljbang-test--eval "`#(+ % 1)"))
+  (cljbang--set-current-ns nil))
+
+(ert-deftest cljbang-test-syntax-quote-qualifies-percent ()
+  "As Clojure does, where `% is user/%.  Only & is left alone."
+  (cljbang-test--eval "(ns sqpct)")
+  (should (eq 'sqpct-% (cljbang-test--eval "`%")))
+  (should (eq '& (cljbang-test--eval "`&")))
+  (cljbang--set-current-ns nil))
+
+(ert-deftest cljbang-test-nested-syntax-quote-is-refused ()
+  (should-error (cljbang-test--eval "``a")))
+
+(ert-deftest cljbang-test-reader-macros-are-text-only ()
+  "A backtick, tilde or @ inside a string or comment is left alone."
+  (should (equal "a ~b and `c and @d" (cljbang-test--eval "(str \"a ~b and `c and @d\")")))
+  (should (equal "x#" (cljbang-test--eval "(str \"x#\")")))
+  (should (equal '(a "~not-unquoted" b) (cljbang-test--eval "`(a \"~not-unquoted\" b)")))
+  (should (eq :ok (cljbang-test--eval ";; `backtick ~tilde @at x#\n:ok"))))
+
 ;;; Macros
 
 (ert-deftest cljbang-test-defmacro ()
@@ -350,6 +559,91 @@ keywords."
   (should (eq :ok (cljbang-test--eval
                    "(defmacro unless-neg [n body] (list 'if (list '< n 0) nil body))
                     (unless-neg 5 :ok)"))))
+
+(ert-deftest cljbang-test-a-name-collision-warns ()
+  "Munging is not reversible, so two namespaces can want one elisp name."
+  (let (warnings)
+    (cl-letf (((symbol-function 'display-warning)
+               (lambda (_type message &rest _) (push message warnings))))
+      (cljbang-test--eval "(ns coll-a-b) (defn c [] :first)")
+      (should (null warnings))
+      ;; same var again is a reload, not a collision
+      (cljbang-test--eval "(ns coll-a-b) (defn c [] :again)")
+      (should (null warnings))
+      (cljbang-test--eval "(ns coll-a) (defn b-c [] :second)")
+      (should (= 1 (length warnings)))
+      (should (string-match-p "coll-a/b-c interns coll-a-b-c" (car warnings)))
+      (should (string-match-p "already coll-a-b/c" (car warnings)))))
+  (cljbang--set-current-ns nil))
+
+(ert-deftest cljbang-test-a-var-of-the-namespace-beats-a-core-function ()
+  "A defn named like a core function is what that name means there."
+  (cljbang-test--eval "(ns shadowcore) (defn map [c] :mine)")
+  (should (eq :mine (cljbang-test--eval "(map [1 2])")))
+  (should (eq 'shadowcore-map (cljbang--resolve-name 'map)))
+  (cljbang--set-current-ns nil)
+  (should (equal '(2 3) (cljbang-test--eval "(map inc [1 2])"))))
+
+(ert-deftest cljbang-test-resolve-name ()
+  "Clojure's resolve, over elisp's flat symbols."
+  (cljbang-test--eval "(ns resolvens) (defn thing [] :x)")
+  (should (eq 'resolvens-thing (cljbang--resolve-name 'thing)))
+  (should (eq 'cljbang-string-join (cljbang--resolve-name 'str/join)))
+  (should (eq 'point (cljbang--resolve-name 'el/point)))
+  (should (eq '1+ (cljbang--resolve-name 'inc)))
+  ;; a special form and an unknown name resolve to nothing, as in Clojure
+  (should (null (cljbang--resolve-name 'if)))
+  (should (null (cljbang--resolve-name 'no-such-name-anywhere)))
+  (cljbang--set-current-ns nil))
+
+(ert-deftest cljbang-test-what-a-symbol-was-interned-as ()
+  (cljbang-test--eval "(ns internedns) (defn thing [] :x)")
+  (should (equal '("internedns" . "thing") (cljbang--interned-as 'internedns-thing)))
+  (should (null (cljbang--interned-as 'not-a-cljbang-name)))
+  (cljbang--set-current-ns nil))
+
+(ert-deftest cljbang-test-a-macro-belongs-to-its-namespace ()
+  "A macro of one namespace must not shadow a name in another."
+  (let ((dir (make-temp-file "cljbang-mac" t)))
+    (unwind-protect
+        (let ((cljbang-load-path (list dir)))
+          (write-region "(ns maclib)\n(defmacro dbl [x] (list '* x 2))\n"
+                        nil (expand-file-name "maclib.clj" dir) nil 'quiet)
+          (write-region (concat "(ns macuser (:require [maclib :as m]))\n"
+                                "(defn dbl [n] :a-function)\n"
+                                "(defn go [] [(m/dbl 21) (dbl 5)])\n")
+                        nil (expand-file-name "macuser.clj" dir) nil 'quiet)
+          (cljbang-load-file (expand-file-name "maclib.clj" dir))
+          (cljbang--set-current-ns nil)
+          ;; not registered outside the namespace that defined it
+          (should-error (cljbang-test--eval "(dbl 3)"))
+          (cljbang-load-file (expand-file-name "macuser.clj" dir))
+          (should (equal [42 :a-function] (macuser-go))))
+      (delete-directory dir t)
+      (cljbang--set-current-ns nil))))
+
+(ert-deftest cljbang-test-builtin-macros-reach-every-namespace ()
+  (cljbang-test--eval "(ns macplain)")
+  (should (eq :y (cljbang-test--eval "(when true :y)")))
+  (should (= 2 (cljbang-test--eval "(-> 1 inc)")))
+  (should (eq :a (cljbang-test--eval "(cond (= 1 1) :a)")))
+  (cljbang--set-current-ns nil))
+
+(ert-deftest cljbang-test-a-macro-is-interned-like-a-var ()
+  "The munged symbol carries the expander, so the namespace comes with it."
+  (cljbang-test--eval "(ns macstate) (defmacro mine [x] x)")
+  (should (get 'macstate-mine 'cljbang-macro))
+  (should (eq 'macstate-mine (cljbang--resolve-name 'mine)))
+  (should (null (get 'mine 'cljbang-macro)))
+  (should (get 'cljbang-core-when 'cljbang-macro))
+  (cljbang--set-current-ns nil))
+
+(ert-deftest cljbang-test-a-macro-of-the-namespace-shadows-a-builtin ()
+  "As a defn named like a core function shadows that function."
+  (cljbang-test--eval "(ns shadowwhen) (defmacro when [& xs] :mine)")
+  (should (eq :mine (cljbang-test--eval "(when true :not-this)")))
+  (cljbang--set-current-ns nil)
+  (should (eq :y (cljbang-test--eval "(when true :y)"))))
 
 (ert-deftest cljbang-test-defmacro-in-a-namespace ()
   (should (= 40 (cljbang-test--eval "(ns mns) (defmacro m1 [x] (list '* x 10)) (m1 4)")))
@@ -1101,16 +1395,40 @@ keywords."
         (progn
           (write-region "(ns cachedmac)\n(defmacro dbl [x] (list '* x 2))\n" nil f nil 'quiet)
           (cljbang-load-file f)
-          ;; forget only this macro, the table also holds the ones
-          ;; cljbang registers at startup
-          (remhash "dbl" cljbang--macros)
-          (remhash "cachedmac/dbl" cljbang--macros)
+          (put 'cachedmac-dbl 'cljbang-macro nil)
           (load (cljbang--cache-file f) nil t)   ; only the cache
           (cljbang--set-current-ns nil)
           (should (= 42 (cljbang-test--eval "(cachedmac/dbl 21)"))))
       (delete-directory dir t)
       (cljbang--set-current-ns nil))))
 
+
+(ert-deftest cljbang-test-a-cached-file-uses-a-macro-from-another ()
+  "The use is expanded when the file is compiled, and the macro is
+registered again when the cache loads."
+  (let ((dir (make-temp-file "cljbang-aot" t)))
+    (unwind-protect
+        (let ((cljbang-load-path (list dir)))
+          (write-region (concat "(ns aotlib)\n"
+                                "(defmacro dbl [x] `(* ~x 2))\n"
+                                "(defn plain [x] (dbl x))\n")
+                        nil (expand-file-name "aotlib.clj" dir) nil 'quiet)
+          (write-region (concat "(ns aotuser (:require [aotlib :as a]))\n"
+                                "(defn go [] [(a/dbl 21) (aotlib/plain 5)])\n")
+                        nil (expand-file-name "aotuser.clj" dir) nil 'quiet)
+          (cljbang-load-file (expand-file-name "aotlib.clj" dir))
+          (cljbang--set-current-ns nil)
+          (cljbang-load-file (expand-file-name "aotuser.clj" dir))
+          (should (equal [42 10] (aotuser-go)))
+          ;; forget the macro, then load only the caches
+          (put 'aotlib-dbl 'cljbang-macro nil)
+          (load (cljbang--cache-file (expand-file-name "aotlib.clj" dir)) nil t)
+          (load (cljbang--cache-file (expand-file-name "aotuser.clj" dir)) nil t)
+          (cljbang--set-current-ns nil)
+          (should (equal [42 10] (aotuser-go)))
+          (should (get 'aotlib-dbl 'cljbang-macro)))
+      (delete-directory dir t)
+      (cljbang--set-current-ns nil))))
 
 (ert-deftest cljbang-test-clojure-string ()
   "Checked against Clojure, including the argument orders elisp reverses."
