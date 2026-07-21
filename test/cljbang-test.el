@@ -103,6 +103,37 @@
   (should (equal "#(not a fn)" (cljbang-test--eval "(#(str \"#(not a fn)\"))"))))
 
 
+;;; Regexes
+
+(ert-deftest cljbang-test-regex-literal ()
+  (should (cljbang--regex-p (cljbang-test--eval "#\"a+\"")))
+  (should (equal "a+" (cljbang--regex-string (cljbang-test--eval "#\"a+\"")))))
+
+(ert-deftest cljbang-test-re-find ()
+  (should (equal "aaa" (cljbang-test--eval "(re-find #\"a+\" \"baaac\")")))
+  (should (null (cljbang-test--eval "(re-find #\"z\" \"abc\")")))
+  ;; groups come back as a vector, whole match first
+  (should (equal ["aab" "aa" "b"]
+                 (cljbang-test--eval "(re-find #\"\\\\(a+\\\\)\\\\(b\\\\)\" \"xaab\")"))))
+
+(ert-deftest cljbang-test-re-matches ()
+  (should (equal "aaa" (cljbang-test--eval "(re-matches #\"a+\" \"aaa\")")))
+  ;; must match all of the string
+  (should (null (cljbang-test--eval "(re-matches #\"a+\" \"baaa\")"))))
+
+(ert-deftest cljbang-test-re-seq ()
+  (should (equal '("ab" "ac") (cljbang-test--eval "(re-seq #\"a.\" \"abac\")"))))
+
+(ert-deftest cljbang-test-replace-dispatches-on-match-type ()
+  "A string match is literal and a regex is not, as in Clojure."
+  (should (equal "a#b#" (cljbang-test--eval "(str/replace \"a1b2\" #\"[0-9]\" \"#\")")))
+  (should (equal "a!b" (cljbang-test--eval "(str/replace \"a.b\" \".\" \"!\")")))
+  (should (equal "ba" (cljbang-test--eval "(str/replace-first \"aa\" #\"a\" \"b\")")))
+  (should (equal ["a" "b" "c"] (cljbang-test--eval "(str/split \"a1b2c\" #\"[0-9]\")"))))
+
+(ert-deftest cljbang-test-regex-rewrite-skips-strings ()
+  (should (equal "#\"not a regex\"" (cljbang-test--eval "(str \"#\\\"not a regex\\\"\")"))))
+
 ;;; Destructuring
 
 (ert-deftest cljbang-test-destructure-sequential ()

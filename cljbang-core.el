@@ -48,6 +48,49 @@
          (let ((h (copy-hash-table coll))) (puthash x x h) h))
         (t (cons x coll))))
 
+(defun cljbang-re-pattern (pattern)
+  "A regex over PATTERN.  The syntax is elisp's, not Java's, as the host wins."
+  (record 'cljbang-regex pattern))
+
+(defun cljbang--regex-p (x)
+  (and (recordp x) (eq (aref x 0) 'cljbang-regex)))
+
+(defun cljbang--regex-string (x)
+  (if (cljbang--regex-p x) (aref x 1) x))
+
+(defun cljbang--match (s)
+  "The last match in S: the string when there are no groups, else a vector."
+  (let ((groups (1- (/ (length (match-data)) 2))))
+    (if (zerop groups)
+        (match-string 0 s)
+      (apply #'vector
+             (mapcar (lambda (i) (match-string i s))
+                     (number-sequence 0 groups))))))
+
+(defun cljbang-re-find (re s)
+  (when (string-match (cljbang--regex-string re) s)
+    (cljbang--match s)))
+
+(defun cljbang-re-matches (re s)
+  "Like re-find, but only when RE matches all of S."
+  (let ((p (cljbang--regex-string re)))
+    (when (and (string-match p s)
+               (= 0 (match-beginning 0))
+               (= (length s) (match-end 0)))
+      (cljbang--match s))))
+
+(defun cljbang-re-seq (re s)
+  (let ((p (cljbang--regex-string re))
+        (i 0)
+        acc)
+    (while (and (<= i (length s)) (string-match p s i))
+      (push (match-string 0 s) acc)
+      ;; an empty match would not advance on its own
+      (setq i (if (= (match-end 0) (match-beginning 0))
+                  (1+ (match-end 0))
+                (match-end 0))))
+    (nreverse acc)))
+
 (defun cljbang-hash-map (&rest kvs)
   (let ((h (make-hash-table :test #'equal)))
     (while kvs (puthash (pop kvs) (pop kvs) h))

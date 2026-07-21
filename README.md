@@ -180,20 +180,12 @@ A require happens once, so cycles terminate. Use `:as-alias` to name a
 namespace without loading it, as in Clojure.
 
 Many Emacs built-ins have a prefix that names no feature, so aliasing one
-is allowed as long as something is defined under it:
+is allowed as long as something is defined under it. Here we load the built-in package `string`:
 
 ```clojure
 (ns my.config (:require [string :as s]))
 (s/trim "  hi  ")        ;; calls string-trim, nothing to load
 ```
-
-A name that is neither a file, nor a feature, nor a prefix in use is a
-typo, and cljbang says so rather than failing later at the call site.
-
-Order matters, because a file is compiled and evaluated one form at a
-time. The `ns` form runs its requires before anything below it, so a
-dependency is loaded by the time the rest of the file is compiled. Within
-a file, define before you use.
 
 The same munging works in reverse, which is what makes ns-qualified syntax
 the natural way to call an Emacs package:
@@ -236,9 +228,6 @@ of it as unresolved. Tell it otherwise in your own `.clj-kondo/config.edn`:
 {:linters {:unresolved-namespace {:exclude [el]}}}
 ```
 
-No require is needed in the source. `el/` always resolves to the host,
-whatever any alias says.
-
 ## Supported
 
 Special forms:
@@ -253,7 +242,8 @@ as macros. Cljbang knows them all, for now.
 
 ### Macros
 
-`defmacro` works. Build the expansion by hand, with `list` and `cons`:
+Since cljbang does not yet support syntax-quite you can build simple macros
+using `list` and `cons`:
 
 ```clojure
 (defmacro twice [x] (list '+ x x))
@@ -268,36 +258,14 @@ A macro is registered while compiling, so a form further down the same
 file can use it. Expansion happens before the arguments are compiled,
 which is the point of one. A `let` binding of the same name shadows it.
 
-### Syntax quote is missing
 
-⚠️ The gap that makes macros awkward. Cljbang reads Clojure with the
-elisp reader, and the reader disagrees about every part of syntax quote:
-
-| written | what actually happens |
-|---|---|
-| `` `(+ 1 2) `` | works, it is elisp's backquote |
-| `` `(+ ,x 1) `` | **the unquote is silently dropped**, you get the symbol `x` |
-| `~x` | reads as a symbol named `~x`, and does nothing |
-| `~@xs` | likewise, a symbol |
-| `x#` | reads as `x`, so an auto-gensym collides instead of being unique |
-
-The second row is the dangerous one. Commas are whitespace in Clojure,
-so cljbang strips them before the compiler runs, and that takes elisp's
-`,` unquote with it. A backquote that looks like it interpolates quietly
-does not:
-
-```clojure
-(let [x 5] `(+ ,x 1))     ;; => (+ x 1), not (+ 5 1)
-```
-
-Until this is fixed, build expansions with `list` and `cons`.
-
-Functions:
+### Functions
 
 ```
 + - * / mod = not= < > <= >= inc dec not odd? even? zero?
 first second rest nth count get contains? conj assoc
 map filter reduce str pr-str println prn name subs
+re-pattern re-find re-matches re-seq
 hash-map hash-set load-file
 ```
 
@@ -327,6 +295,16 @@ functions.
 (filter #{1 3} [1 2 3 4])   ;; => (1 3)
 ```
 
+Regex literals, which are elisp regexps rather than Java ones, so groups
+and alternation are spelled `\\(` and `\\|`:
+
+```clojure
+(re-find #"a+" "baaac")                    ;; => "aaa"
+(re-seq #"a." "abac")                      ;; => ("ab" "ac")
+(str/replace "a1b2" #"[0-9]" "#")          ;; => "a#b#"
+(str/replace "a.b" "." "!")                ;; => "a!b", a string match is literal
+```
+
 Anonymous function literals, with `%`, `%1`, `%2` and `%&`:
 
 ```clojure
@@ -348,6 +326,8 @@ Host semantics win where they conflict, unless otherwise noted, like in Squint.
 - `#{...}` and `#(...)` need source text and so do not work inside `clj!`.
   Use `hash-set` and `fn` there, or move your source to a `.clj` file.
 - `:strs`, `:syms` and namespaced `:keys` are not implemented
+- regexes use elisp syntax, not Java's, so `#"\\(a\\|b\\)"` where Clojure
+  writes `#"(a|b)"`
 - no syntax quote, so macros build their expansion with `list` and `cons`
 - no protocols and no multimethods
 

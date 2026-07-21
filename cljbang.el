@@ -46,6 +46,8 @@
     (hash-set . cljbang-hash-set) (contains? . cljbang-contains?)
     (assoc . cljbang-assoc)
     (subs . cljbang-subs)
+    (re-pattern . cljbang-re-pattern) (re-find . cljbang-re-find)
+    (re-matches . cljbang-re-matches) (re-seq . cljbang-re-seq)
     (load-file . cljbang-load-file)))
 
 
@@ -641,6 +643,17 @@ it applies to files and inline evaluation but not to `clj!'."
             (unless (save-excursion (nth 3 (syntax-ppss beg)))
               (push (list beg (length find) replace) edits))
             (goto-char (+ beg (length find))))))
+      ;; #"..." needs a closing paren after the string, so it takes two
+      ;; edits and has to find where the string ends
+      (goto-char (point-min))
+      (while (search-forward "#\"" nil t)
+        (let ((beg (match-beginning 0)))
+          (unless (save-excursion (nth 3 (syntax-ppss beg)))
+            (goto-char (1+ beg))              ; on the opening quote
+            (let ((end (save-excursion (forward-sexp) (point))))
+              (push (list end 0 ")") edits)
+              (push (list beg 2 "(cljbang-re-pattern \"") edits)
+              (goto-char end)))))
       ;; latest position first, so the earlier ones stay valid
       (pcase-dolist (`(,pos ,len ,replace)
                      (sort edits (lambda (a b) (> (car a) (car b)))))

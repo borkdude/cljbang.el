@@ -17,10 +17,20 @@
     (mapconcat #'cljbang-str xs sep)))
 
 (defun cljbang-string-split (s re)
-  (apply #'vector (split-string s re)))
+  (apply #'vector (split-string s (cljbang--regex-string re))))
 
 (defun cljbang-string-replace (s match rep)
-  (replace-regexp-in-string (regexp-quote match) rep s))
+  "Replace MATCH in S with REP.  A string MATCH is literal, a regex is not."
+  (if (cljbang--regex-p match)
+      (replace-regexp-in-string (aref match 1) rep s)
+    (replace-regexp-in-string (regexp-quote match) rep s t t)))
+
+(defun cljbang-string-replace-first (s match rep)
+  "Like `cljbang-string-replace', but only the first match."
+  (let ((p (if (cljbang--regex-p match) (aref match 1) (regexp-quote match))))
+    (if (string-match p s)
+        (concat (substring s 0 (match-beginning 0)) rep (substring s (match-end 0)))
+      s)))
 
 (defun cljbang-string-includes? (s substr)
   (and (string-search substr s) t))
@@ -57,6 +67,7 @@
   '(("clojure.string/join" . cljbang-string-join)
     ("clojure.string/split" . cljbang-string-split)
     ("clojure.string/replace" . cljbang-string-replace)
+    ("clojure.string/replace-first" . cljbang-string-replace-first)
     ("clojure.string/upper-case" . upcase)
     ("clojure.string/lower-case" . downcase)
     ("clojure.string/capitalize" . capitalize)
