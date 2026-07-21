@@ -197,6 +197,16 @@ el/tab-width                            ; a variable, not a function
 (set! el/my/some-var 42)                ; slash preserved
 ```
 
+There is no Clojure namespace called `el`, so clj-kondo reports every use
+of it as unresolved. Tell it otherwise in your own `.clj-kondo/config.edn`:
+
+```clojure
+{:linters {:unresolved-namespace {:exclude [el]}}}
+```
+
+No require is needed in the source. `el/` always resolves to the host,
+whatever any alias says.
+
 ## Supported
 
 Special forms:
