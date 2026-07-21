@@ -107,8 +107,10 @@ my-config-answer          ;; => 7
 (my-config--shout "hey")  ;; => "HEY"
 ```
 
-Dots become dashes, so `(ns my.deep.ns)` gives `my-deep-ns-name`. From
-cljbang, reach them with the namespace: `(my.config/greet "you")`.
+```clojure
+(my.config/greet "you")   ;; from cljbang, reach them with the namespace
+(ns my.deep.ns)           ;; dots become dashes: my-deep-ns-name
+```
 
 The `ns` is in effect only while the file loads, so it does not leak into
 whatever you evaluate next.
@@ -135,19 +137,18 @@ A file with no `ns` can require at the top level, and so can elisp:
 (cljbang-require 'lib.b)
 ```
 
-A require happens once, so cycles terminate. `:as-alias` names a
-namespace without loading it, as in Clojure. Aliasing a prefix that names
-no feature is allowed when something is defined under it, which covers
-Emacs built-ins like `string-`.
-
-Qualified names reach elisp the same way, which is what makes this the
-natural way to call a package. Internal names are not reachable so use
-`el/` for those:
-
 ```clojure
-(magit/status)                  ;; calls magit-status
-(el/magit--display-buffer buf)  ;; the internal one
+(ns my.config
+  (:require [lib.b :as b]          ;; loads lib/b.clj
+            [magit :as m]          ;; loads the elisp feature
+            [string :as s]         ;; a built-in prefix, nothing to load
+            [lib.c :as-alias c]))  ;; names it without loading
+
+(magit/status)                  ;; qualified names work the same way
+(el/magit--display-buffer buf)  ;; internal names need el/
 ```
+
+A require happens once, so cycles terminate.
 
 ### Calling a package
 
@@ -278,20 +279,27 @@ Anonymous function literals, with `%`, `%1`, `%2` and `%&`:
 
 Host semantics win where they conflict, unless otherwise noted, like in Squint.
 
-- `/` is elisp division: integers, no ratios
-- characters are integers, so `(nth "abc" 0)` is `97`
-- `assoc` copies the map, so it is O(n)
-- an empty list is false, because elisp has no empty list distinct from
-  `nil`. `0`, `""`, `[]` and `{}` are all true as in Clojure, and `false`
-  compiles to `nil`, but `(if '() :y :n)` is `:n` here and `:y` in
-  Clojure
-- `#{...}` and `#(...)` need source text and so do not work inside `clj!`.
-  Use `hash-set` and `fn` there, or move your source to a `.clj` file.
-- `:strs`, `:syms` and namespaced `:keys` are not implemented
-- regexes use elisp syntax, not Java's, so `#"\\(a\\|b\\)"` where Clojure
-  writes `#"(a|b)"`
-- no syntax quote, so macros build their expansion with `list` and `cons`
-- no protocols and no multimethods
+```clojure
+(/ 1 2)             ;; => 0, elisp division, no ratios
+(nth "abc" 0)       ;; => 97, characters are integers
+(if (list) :y :n)   ;; => :n, elisp has no empty list distinct from nil
+(if [] :y :n)       ;; => :y, and 0, "" and {} are true as in Clojure
+
+#"\\(a\\|b\\)"       ;; elisp regex syntax, where Clojure writes #"(a|b)"
+(assoc m :k 1)      ;; copies the map, so O(n)
+```
+
+Inside `clj!` there is no source text to rewrite, so use `hash-set` and
+`fn`, or move the code to a `.clj` file:
+
+```clojure
+(clj! #{1 2})       ;; read error
+(clj! (hash-set 1 2))
+```
+
+Not implemented: syntax quote, so macros build expansions with `list` and
+`cons`. `:strs`, `:syms` and namespaced `:keys`. Protocols and
+multimethods.
 
 ## Benchmarks
 
