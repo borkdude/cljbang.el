@@ -543,6 +543,57 @@ keywords."
   (should-error (cljbang-test--eval "(try (throw 5) (catch error))"))
   (should-error (cljbang-test--eval "(try (throw 1) (catch error e e) (println :after))")))
 
+(ert-deftest cljbang-test-case ()
+  (should (eq :a (cljbang-test--eval "(case 1 1 :a 2 :b)")))
+  (should (eq :b (cljbang-test--eval "(case 2 1 :a 2 :b)")))
+  (should (eq :fallback (cljbang-test--eval "(case 9 1 :a :fallback)")))
+  (should (eq :yes (cljbang-test--eval "(case :k :k :yes :no)")))
+  (should (eq :yes (cljbang-test--eval "(case \"s\" \"s\" :yes :no)")))
+  (should (eq :two (cljbang-test--eval "(case (inc 1) 2 :two :other)"))))
+
+(ert-deftest cljbang-test-case-does-not-evaluate-its-constants ()
+  (should (eq :yes (cljbang-test--eval "(case 'foo foo :yes :no)"))))
+
+(ert-deftest cljbang-test-case-list-constant-matches-any ()
+  (should (eq :either (cljbang-test--eval "(case 2 (1 2) :either :no)")))
+  (should (eq :no (cljbang-test--eval "(case 3 (1 2) :either :no)"))))
+
+(ert-deftest cljbang-test-case-without-a-default-throws ()
+  (should-error (cljbang-test--eval "(case 9 1 :a)")))
+
+(ert-deftest cljbang-test-loop-recur ()
+  (should (= 3 (cljbang-test--eval "(loop [i 0] (if (< i 3) (recur (inc i)) i))")))
+  (should (equal [0 1 2] (cljbang-test--eval
+                          "(loop [i 0 acc []] (if (< i 3) (recur (inc i) (conj acc i)) acc))")))
+  (should (eq :done (cljbang-test--eval "(loop [] :done)"))))
+
+(ert-deftest cljbang-test-recur-rebinds-simultaneously ()
+  "Clojure rebinds every loop variable at once, so a swap swaps."
+  (should (equal [2 1] (cljbang-test--eval
+                        "(loop [a 1 b 2] (if (= a 1) (recur b a) [a b]))"))))
+
+(ert-deftest cljbang-test-loop-destructures ()
+  (should (equal [3 2] (cljbang-test--eval
+                        "(loop [[a b] [1 2]] (if (< a 3) (recur [(inc a) b]) [a b]))")))
+  (should (= 2 (cljbang-test--eval
+                "(loop [{:keys [n]} {:n 0}] (if (< n 2) (recur {:n (inc n)}) n))"))))
+
+(ert-deftest cljbang-test-loop-does-not-grow-the-stack ()
+  (should (= 100000 (cljbang-test--eval
+                     "(loop [i 0] (if (< i 100000) (recur (inc i)) i))"))))
+
+(ert-deftest cljbang-test-recur-is-checked ()
+  (should-error (cljbang-test--eval "(recur 1)"))
+  (should-error (cljbang-test--eval "(loop [i 0] (recur 1 2))"))
+  (should-error (cljbang-test--eval "(loop [i 0] ((fn [] (recur 1))))")))
+
+(ert-deftest cljbang-test-some-threading ()
+  (should (= 2 (cljbang-test--eval "(some-> 1 inc)")))
+  (should (null (cljbang-test--eval "(some-> nil inc)")))
+  (should (= 2 (cljbang-test--eval "(some-> {:a 1} (get :a) inc)")))
+  (should (equal '(2) (cljbang-test--eval "(some->> [1] (map inc))")))
+  (should (null (cljbang-test--eval "(some->> nil (map inc))"))))
+
 (ert-deftest cljbang-test-if-when-do ()
   (should (eq :y (cljbang-test--eval "(if true :y :n)")))
   (should (null (cljbang-test--eval "(when false :y)")))
@@ -667,6 +718,107 @@ keywords."
                             (overlay-get (car cljbang--result-overlays)
                                          'after-string)))))
 
+
+;;; Sequence and map functions
+
+(ert-deftest cljbang-test-seq-functions ()
+  (should (equal [1 2] (cljbang-test--eval "(into [] [1 2])")))
+  (should (equal [1 2 3] (cljbang-test--eval "(into [1] (list 2 3))")))
+  (should (equal [2 3] (cljbang-test--eval "(mapv inc [1 2])")))
+  (should (equal '(1 1 2 2) (cljbang-test--eval "(mapcat (fn [x] [x x]) [1 2])")))
+  (should (equal '(1 2) (cljbang-test--eval "(take 2 [1 2 3])")))
+  (should (equal '(2 3) (cljbang-test--eval "(drop 1 [1 2 3])")))
+  (should (equal '(1 3) (cljbang-test--eval "(take-while odd? [1 3 2])")))
+  (should (equal '(1 2) (cljbang-test--eval "(distinct [1 1 2])")))
+  (should (equal [1 2] (cljbang-test--eval "(vec (list 1 2))"))))
+
+(ert-deftest cljbang-test-range ()
+  (should (equal '(0 1 2) (cljbang-test--eval "(range 3)")))
+  (should (equal '(1 2 3) (cljbang-test--eval "(range 1 4)")))
+  (should (equal '(4 3 2) (cljbang-test--eval "(range 4 1 -1)")))
+  (should (null (cljbang-test--eval "(range 0)"))))
+
+(ert-deftest cljbang-test-seq-is-nil-when-empty ()
+  (should (null (cljbang-test--eval "(seq [])")))
+  (should (equal '(1) (cljbang-test--eval "(seq [1])")))
+  (should (cljbang-test--eval "(empty? [])"))
+  (should (cljbang-test--eval "(empty? {})"))
+  (should-not (cljbang-test--eval "(empty? [1])")))
+
+(ert-deftest cljbang-test-apply-takes-a-collection-last ()
+  "Elisp apply needs a list, Clojure's takes any collection."
+  (should (= 6 (cljbang-test--eval "(apply + [1 2 3])")))
+  (should (= 6 (cljbang-test--eval "(apply + 1 [2 3])"))))
+
+(ert-deftest cljbang-test-some-and-every ()
+  (should (cljbang-test--eval "(some odd? [2 3])"))
+  (should (null (cljbang-test--eval "(some odd? [2 4])")))
+  (should (= 3 (cljbang-test--eval "(some #{3} [2 3])")))
+  (should (cljbang-test--eval "(every? odd? [1 3])"))
+  (should-not (cljbang-test--eval "(every? odd? [1 2])")))
+
+(ert-deftest cljbang-test-sort-by ()
+  (should (equal '("a" "aaa") (cljbang-test--eval "(sort-by count [\"aaa\" \"a\"])")))
+  (should (equal '("aaa" "a") (cljbang-test--eval "(sort-by count > [\"a\" \"aaa\"])"))))
+
+(ert-deftest cljbang-test-map-functions ()
+  (should (equal '(:a) (cljbang-test--eval "(keys {:a 1})")))
+  (should (equal '(1) (cljbang-test--eval "(vals {:a 1})")))
+  (should (= 2 (cljbang-test--eval "(get (merge {:a 1} {:a 2}) :a)")))
+  (should (= 2 (cljbang-test--eval "(get (update {:a 1} :a inc) :a)")))
+  (should (null (cljbang-test--eval "(get (dissoc {:a 1} :a) :a)")))
+  (should (= 1 (cljbang-test--eval "(count (select-keys {:a 1 :b 2} [:a]))"))))
+
+(ert-deftest cljbang-test-nested-map-access ()
+  (should (= 1 (cljbang-test--eval "(get-in {:a {:b 1}} [:a :b])")))
+  (should (eq :d (cljbang-test--eval "(get-in {:a 1} [:x] :d)")))
+  (should (= 1 (cljbang-test--eval "(get-in (assoc-in {} [:a :b] 1) [:a :b])")))
+  (should (= 2 (cljbang-test--eval "(get-in (update-in {:a {:b 1}} [:a :b] inc) [:a :b])"))))
+
+(ert-deftest cljbang-test-keys-and-vals-read-alists ()
+  "An alist reads as a map, so its keys and values do too."
+  (should (equal '(:a) (cljbang-test--eval "(keys '((:a . 1)))")))
+  (should (equal '(1) (cljbang-test--eval "(vals '((:a . 1)))"))))
+
+(ert-deftest cljbang-test-into-refuses-an-ambiguous-pair ()
+  "A map and a set are the same type, so a pair onto one is undecidable."
+  (should-error (cljbang-test--eval "(into {} [[:a 1]])"))
+  (should (= 2 (cljbang-test--eval "(count (into #{} [1 2]))"))))
+
+(ert-deftest cljbang-test-function-functions ()
+  (should (= 3 (cljbang-test--eval "((partial + 1) 2)")))
+  (should (= 3 (cljbang-test--eval "((comp inc inc) 1)")))
+  (should (null (cljbang-test--eval "((complement odd?) 1)")))
+  (should (eq :k (cljbang-test--eval "((constantly :k) 9)"))))
+
+(ert-deftest cljbang-test-predicates ()
+  (should (cljbang-test--eval "(map? {})"))
+  (should (cljbang-test--eval "(vector? [1])"))
+  (should (cljbang-test--eval "(nil? nil)"))
+  (should (cljbang-test--eval "(some? 1)"))
+  (should (cljbang-test--eval "(string? \"a\")"))
+  (should (cljbang-test--eval "(keyword? :a)")))
+
+(ert-deftest cljbang-test-symbol-is-not-a-keyword ()
+  "A keyword is a symbol in elisp, but not in Clojure."
+  (should (cljbang-test--eval "(symbol? 'a)"))
+  (should-not (cljbang-test--eval "(symbol? :a)"))
+  (should (eq :a (cljbang-test--eval "(keyword \"a\")")))
+  (should (eq 'a (cljbang-test--eval "(symbol \"a\")"))))
+
+;;; Atoms
+
+(ert-deftest cljbang-test-atom ()
+  (should (= 1 (cljbang-test--eval "(let [a (atom 0)] (swap! a inc) (deref a))")))
+  (should (= 5 (cljbang-test--eval "(let [a (atom 0)] (reset! a 5) (deref a))")))
+  (should (= 2 (cljbang-test--eval
+                "(let [a (atom {:n 1})] (swap! a update :n inc) (get (deref a) :n))"))))
+
+(ert-deftest cljbang-test-deref-reader-syntax ()
+  "@x reads as a deref, and only at the start of a token."
+  (should (= 5 (cljbang-test--eval "(let [a (atom 5)] @a)")))
+  (should (= 6 (cljbang-test--eval "(let [a (atom 5)] (inc @a))")))
+  (should (equal "a@b" (cljbang-test--eval "(str \"a@b\")"))))
 
 ;;; Sets, maps, keywords and vectors as functions
 

@@ -147,6 +147,183 @@
                 (match-end 0))))
     (nreverse acc)))
 
+;;; Sequences
+
+(defun cljbang--list (coll)
+  "COLL as a list, taking a map as its keys and values in pairs."
+  (cond ((hash-table-p coll)
+         (let (pairs)
+           (maphash (lambda (k v) (push (vector k v) pairs)) coll)
+           (nreverse pairs)))
+        (t (seq-into coll 'list))))
+
+(defun cljbang-seq (coll)
+  "COLL as a list, or nil when it is empty, as in Clojure."
+  (let ((l (cljbang--list coll)))
+    (and l l)))
+
+(defun cljbang-vec (coll) (seq-into (cljbang--list coll) 'vector))
+
+(defun cljbang-mapv (f coll)
+  (seq-into (cljbang-map f coll) 'vector))
+
+(defun cljbang-mapcat (f coll)
+  (apply #'cljbang-concat (cljbang-map f coll)))
+
+(defun cljbang-take (n coll)
+  (seq-take (cljbang--list coll) (max n 0)))
+
+(defun cljbang-drop (n coll)
+  (seq-drop (cljbang--list coll) (max n 0)))
+
+(defun cljbang-take-while (pred coll)
+  (seq-take-while (cljbang--fn pred) (cljbang--list coll)))
+
+(defun cljbang-drop-while (pred coll)
+  (seq-drop-while (cljbang--fn pred) (cljbang--list coll)))
+
+(defun cljbang-distinct (coll)
+  (delete-dups (cljbang--list coll)))
+
+(defun cljbang-some (pred coll)
+  "The first truthy (PRED x) over COLL, else nil."
+  (let ((f (cljbang--fn pred)))
+    (catch 'cljbang--some
+      (dolist (x (cljbang--list coll))
+        (let ((v (funcall f x)))
+          (when v (throw 'cljbang--some v)))))))
+
+(defun cljbang-every? (pred coll)
+  (and (seq-every-p (cljbang--fn pred) (cljbang--list coll)) t))
+
+(defun cljbang-sort-by (keyfn comp &optional coll)
+  "Sort COLL by KEYFN, comparing with COMP when given."
+  (unless coll (setq coll comp comp nil))
+  (let ((key (cljbang--fn keyfn))
+        (lt (if comp (cljbang--fn comp) #'cljbang--compare-lt)))
+    (sort (append coll nil)
+          (lambda (a b) (funcall lt (funcall key a) (funcall key b))))))
+
+(defun cljbang-range (&rest args)
+  "Integers from START to END by STEP, as in Clojure."
+  (let* ((start (if (cdr args) (car args) 0))
+         (end (if (cdr args) (cadr args) (car args)))
+         (step (or (caddr args) 1))
+         acc)
+    (if (> step 0)
+        (while (< start end) (push start acc) (setq start (+ start step)))
+      (while (> start end) (push start acc) (setq start (+ start step))))
+    (nreverse acc)))
+
+(defun cljbang-into (to from)
+  "Conj every element of FROM onto TO.
+A pair onto a hash table is refused, since a map and a set are the same
+type here, so there is no way to tell assoc from adding the pair itself."
+  (when (hash-table-p to)
+    (dolist (x (cljbang--list from))
+      (when (and (vectorp x) (= 2 (length x)))
+        (error "cljbang: into cannot tell a map from a set, use hash-map"))))
+  (seq-reduce #'cljbang-conj (cljbang--list from) to))
+
+(defun cljbang-empty? (coll)
+  (zerop (cljbang-count coll)))
+
+(defun cljbang-apply (f &rest args)
+  "Call F with ARGS, the last of which is a collection, as in Clojure."
+  (apply #'cljbang--invoke f
+         (append (butlast args) (cljbang--list (car (last args))))))
+
+;;; Maps
+
+(defun cljbang-keys (m)
+  (cond ((hash-table-p m) (hash-table-keys m))
+        ((consp m) (mapcar #'car m))))
+
+(defun cljbang-vals (m)
+  (cond ((hash-table-p m) (hash-table-values m))
+        ((consp m) (mapcar #'cdr m))))
+
+(defun cljbang-merge (&rest ms)
+  (let ((out (make-hash-table :test #'equal)))
+    (dolist (m ms out)
+      (when m (maphash (lambda (k v) (puthash k v out)) m)))))
+
+(defun cljbang-dissoc (m &rest ks)
+  (let ((h (copy-hash-table m)))
+    (dolist (k ks h) (remhash k h))))
+
+(defun cljbang-select-keys (m ks)
+  (let ((h (make-hash-table :test #'equal)))
+    (dolist (k (cljbang--list ks) h)
+      (when (cljbang-contains? m k) (puthash k (cljbang-get m k) h)))))
+
+(defun cljbang-update (m k f &rest args)
+  (cljbang-assoc m k (apply #'cljbang--invoke f (cljbang-get m k) args)))
+
+(defun cljbang-get-in (m path &optional default)
+  (let ((v m))
+    (catch 'cljbang--missing
+      (dolist (k (cljbang--list path) v)
+        (unless (cljbang-contains? v k) (throw 'cljbang--missing default))
+        (setq v (cljbang-get v k))))))
+
+(defun cljbang-assoc-in (m path v)
+  (let ((ks (cljbang--list path)))
+    (if (null (cdr ks))
+        (cljbang-assoc m (car ks) v)
+      (cljbang-assoc m (car ks)
+                     (cljbang-assoc-in (or (cljbang-get m (car ks))
+                                           (make-hash-table :test #'equal))
+                                       (cdr ks) v)))))
+
+(defun cljbang-update-in (m path f &rest args)
+  (cljbang-assoc-in m path (apply #'cljbang--invoke f (cljbang-get-in m path) args)))
+
+;;; Functions
+
+(defun cljbang-partial (f &rest bound)
+  (lambda (&rest args) (apply #'cljbang--invoke f (append bound args))))
+
+(defun cljbang-comp (&rest fs)
+  (if (null fs)
+      #'identity
+    (let ((fs (reverse fs)))
+      (lambda (&rest args)
+        (let ((v (apply #'cljbang--invoke (car fs) args)))
+          (dolist (f (cdr fs) v)
+            (setq v (cljbang--invoke f v))))))))
+
+(defun cljbang-complement (f)
+  (lambda (&rest args) (not (apply #'cljbang--invoke f args))))
+
+(defun cljbang-constantly (x) (lambda (&rest _) x))
+
+;;; Atoms
+
+(defun cljbang-atom (x) (record 'cljbang-atom x))
+
+(defun cljbang-deref (a)
+  (if (and (recordp a) (eq (aref a 0) 'cljbang-atom)) (aref a 1) a))
+
+(defun cljbang-reset! (a v) (aset a 1 v) v)
+
+(defun cljbang-swap! (a f &rest args)
+  (aset a 1 (apply #'cljbang--invoke f (aref a 1) args))
+  (aref a 1))
+
+;;; Predicates
+
+(defun cljbang-keyword (x) (intern (concat ":" (cljbang-name x))))
+(defun cljbang-symbol (x) (intern (cljbang-name x)))
+(defun cljbang-nil? (x) (null x))
+(defun cljbang-some? (x) (not (null x)))
+(defun cljbang-map? (x) (hash-table-p x))
+(defun cljbang-fn? (x) (functionp x))
+
+(defun cljbang-symbol? (x)
+  "Whether X is a symbol.  A keyword is one in elisp, but not in Clojure."
+  (and (symbolp x) (not (keywordp x)) (not (null x)) (not (eq x t))))
+
 (defun cljbang-hash-map (&rest kvs)
   (let ((h (make-hash-table :test #'equal)))
     (while kvs (puthash (pop kvs) (pop kvs) h))

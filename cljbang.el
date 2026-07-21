@@ -50,6 +50,27 @@
     (subs . cljbang-subs) (throw . cljbang-throw)
     (ex-info . cljbang-ex-info) (ex-message . cljbang-ex-message)
     (ex-data . cljbang-ex-data) (ex-cause . cljbang-ex-cause)
+    (seq . cljbang-seq) (vec . cljbang-vec) (mapv . cljbang-mapv)
+    (mapcat . cljbang-mapcat) (into . cljbang-into) (range . cljbang-range)
+    (take . cljbang-take) (drop . cljbang-drop)
+    (take-while . cljbang-take-while) (drop-while . cljbang-drop-while)
+    (distinct . cljbang-distinct) (some . cljbang-some)
+    (every? . cljbang-every?) (sort-by . cljbang-sort-by)
+    (empty? . cljbang-empty?) (apply . cljbang-apply)
+    (keys . cljbang-keys) (vals . cljbang-vals) (merge . cljbang-merge)
+    (dissoc . cljbang-dissoc) (select-keys . cljbang-select-keys)
+    (update . cljbang-update) (get-in . cljbang-get-in)
+    (assoc-in . cljbang-assoc-in) (update-in . cljbang-update-in)
+    (partial . cljbang-partial) (comp . cljbang-comp)
+    (complement . cljbang-complement) (constantly . cljbang-constantly)
+    (atom . cljbang-atom) (deref . cljbang-deref)
+    (reset! . cljbang-reset!) (swap! . cljbang-swap!)
+    (keyword . cljbang-keyword) (symbol . cljbang-symbol)
+    (nil? . cljbang-nil?) (some? . cljbang-some?) (map? . cljbang-map?)
+    (fn? . cljbang-fn?) (symbol? . cljbang-symbol?)
+    (string? . stringp) (number? . numberp) (integer? . integerp)
+    (int? . integerp) (keyword? . keywordp) (vector? . vectorp)
+    (pos? . cl-plusp) (neg? . cl-minusp)
     (re-pattern . cljbang-re-pattern) (re-find . cljbang-re-find)
     (re-matches . cljbang-re-matches) (re-seq . cljbang-re-seq)
     (load-file . cljbang-load-file)))
@@ -265,9 +286,12 @@ names a namespace without loading it as in Clojure."
 ;; there.  cljbang knows them all, until enough of it is written in
 ;; cljbang itself.
 (defconst cljbang--special-forms
-  '("def" "defn" "defn-" "defmacro" "fn" "let" "set!" "if" "do"
+  '("def" "defn" "defn-" "defmacro" "fn" "let" "loop" "recur" "set!" "if" "do"
     "try" "ns" "require" "quote" "comment")
   "Names `cljbang-compile' handles itself.")
+
+(defvar cljbang--recur-target nil
+  "Slots, temporaries and flag a recur rebinds, or nil outside a loop.")
 
 (defun cljbang--compile-body (forms env)
   (mapcar (lambda (f) (cljbang-compile f env)) forms))
@@ -403,7 +427,9 @@ key is the pattern and the value is the map key to look up."
     (list nil (car rest) (cdr rest))))
 
 (defun cljbang--compile-fn (params body env)
-  (let ((arglist nil) (patterns nil) (env* env))
+  ;; a fn body is not the loop's, so recur inside one does not reach out
+  (let ((cljbang--recur-target nil)
+        (arglist nil) (patterns nil) (env* env))
     ;; a destructuring param becomes a gensym in the arglist, unpacked by
     ;; a let* wrapped around the body
     (dolist (p (append params nil))
@@ -474,13 +500,77 @@ key is the pattern and the value is the map key to look up."
           `(unwind-protect ,caught ,@(cljbang--compile-body finally env))
         caught))))
 
+;; Each binding gets a slot holding its raw value, destructured afresh at
+;; the top of every pass, so a loop pattern works the way a let one does.
+;; recur fills the temporaries first and copies them over after the body,
+;; which is what makes the rebinding simultaneous.
+(defun cljbang--compile-loop (bindings body env)
+  "Compile a loop over BINDINGS with BODY, looping on recur."
+  (let* ((pairs (cl-loop for (pattern val) on (append bindings nil) by #'cddr
+                         collect (list pattern val)))
+         (slots (mapcar (lambda (_) (gensym "cljbang-loop-")) pairs))
+         (temps (mapcar (lambda (_) (gensym "cljbang-recur-")) pairs))
+         (again (gensym "cljbang-again-"))
+         (result (gensym "cljbang-result-"))
+         (env* env)
+         inits bound)
+    (cl-loop for (_ val) in pairs
+             for slot in slots
+             do (push (list slot (cljbang-compile val env)) inits))
+    (cl-loop for (pattern _) in pairs
+             for slot in slots
+             do (dolist (b (cljbang--destructure pattern slot env*))
+                  (push b bound)
+                  (push (car b) env*)))
+    (let* ((cljbang--recur-target (list slots temps again))
+           (compiled (cljbang--compile-body body env*)))
+      `(let* (,@(nreverse inits) ,@temps (,again t) (,result nil))
+         (while ,again
+           (setq ,again nil)
+           (let* ,(nreverse bound)
+             (setq ,result (progn ,@compiled)))
+           (when ,again
+             (setq ,@(cl-loop for slot in slots for temp in temps
+                              append (list slot temp)))))
+         ,result))))
+
+(defun cljbang--compile-recur (args env)
+  (unless cljbang--recur-target
+    (error "cljbang: recur outside of a loop"))
+  (pcase-let ((`(,slots ,temps ,again) cljbang--recur-target))
+    (unless (= (length args) (length slots))
+      (error "cljbang: recur wants %d argument(s), got %d"
+             (length slots) (length args)))
+    `(progn (setq ,@(cl-loop for temp in temps for arg in args
+                             append (list temp (cljbang-compile arg env))))
+            (setq ,again t)
+            nil)))
+
 (defun cljbang--thread (init forms first?)
   "Expand -> (FIRST? t) or ->> threading."
   (let ((acc init))
     (dolist (f forms acc)
-      (setq acc (cond ((not (consp f)) (list f acc))
-                      (first? (cons (car f) (cons acc (cdr f))))
-                      (t (append f (list acc))))))))
+      (setq acc (cljbang--thread-1 f acc first?)))))
+
+(defun cljbang--thread-1 (form acc first?)
+  "Thread ACC into FORM, in first or last position."
+  (cond ((not (consp form)) (list form acc))
+        (first? (cons (car form) (cons acc (cdr form))))
+        (t (append form (list acc)))))
+
+;; each step binds its value, so the next step sees it and a nil stops
+;; the chain without running what follows
+(defun cljbang--some-thread (init forms first?)
+  "Expand some-> (FIRST? t) or some->> threading."
+  (if (null forms)
+      init
+    (let ((step (gensym "cljbang-some-")))
+      (list 'let (vector step init)
+            (list 'if step
+                  (cljbang--some-thread
+                   (cljbang--thread-1 (car forms) step first?)
+                   (cdr forms) first?)
+                  nil)))))
 
 
 (defun cljbang--assign-target (sym env)
@@ -648,6 +738,8 @@ magti/status without complaining about magit/status."
        `(setq ,(cljbang--assign-target (cadr form) env)
               ,(cljbang-compile (caddr form) env)))
       ('let (cljbang--compile-let (cadr form) (cddr form) env))
+      ('loop (cljbang--compile-loop (cadr form) (cddr form) env))
+      ('recur (cljbang--compile-recur (cdr form) env))
       ('try (cljbang--compile-try (cdr form) env))
       ('if `(if ,@(cljbang--compile-body (cdr form) env)))
       ('do `(progn ,@(cljbang--compile-body (cdr form) env)))
@@ -716,6 +808,20 @@ it applies to files and inline evaluation but not to `clj!'."
             (let ((end (save-excursion (forward-sexp) (point))))
               (push (list end 0 ")") edits)
               (push (list beg 2 "(cljbang-re-pattern \"") edits)
+              (goto-char end)))))
+      ;; @x is a deref of the sexp after it, so it takes two edits as well.
+      ;; Only at the start of a token, since an elisp symbol may contain @.
+      (goto-char (point-min))
+      (while (search-forward "@" nil t)
+        (let ((beg (match-beginning 0)))
+          (when (and (not (save-excursion (nth 3 (syntax-ppss beg))))
+                     (or (= beg (point-min))
+                         (memq (char-before beg) '(?\s ?\t ?\n ?\( ?\[ ?{))))
+            (goto-char (1+ beg))
+            (when-let* ((end (ignore-errors
+                               (save-excursion (forward-sexp) (point)))))
+              (push (list end 0 ")") edits)
+              (push (list beg 1 "(cljbang-deref ") edits)
               (goto-char end)))))
       ;; latest position first, so the earlier ones stay valid
       (pcase-dolist (`(,pos ,len ,replace)
@@ -918,6 +1024,47 @@ happens once unless RELOAD is non-nil."
 (cljbang--register-macro
  "->>" nil
  (lambda (init &rest forms) (cljbang--thread init forms nil)))
+
+;; the constants are not evaluated, so they are quoted into the test.  A
+;; list constant matches any of its elements, as it does in Clojure.
+(defun cljbang--case (expr clauses)
+  "Expansion of case over EXPR and CLAUSES, pairs then an optional default."
+  (let ((val (gensym "cljbang-case-"))
+        (default (when (cl-oddp (length clauses))
+                   (car (last clauses))))
+        (pairs (if (cl-oddp (length clauses)) (butlast clauses) clauses))
+        tests)
+    (while pairs
+      (let ((const (pop pairs))
+            (result (pop pairs)))
+        (push (list (if (consp const)
+                        (list 'contains? (cons 'hash-set
+                                               (mapcar (lambda (c) (list 'quote c)) const))
+                              val)
+                      (list '= val (list 'quote const)))
+                    result)
+              tests)))
+    (list 'let (vector val expr)
+          (cons 'cond
+                (append (apply #'append (nreverse tests))
+                        (list :else
+                              (or default
+                                  (list 'throw
+                                        (list 'ex-info "No matching clause"
+                                              (list 'cljbang--map-literal
+                                                    :value val))))))))))
+
+(cljbang--register-macro
+ "case" nil
+ (lambda (expr &rest clauses) (cljbang--case expr clauses)))
+
+(cljbang--register-macro
+ "some->" nil
+ (lambda (init &rest forms) (cljbang--some-thread init forms t)))
+
+(cljbang--register-macro
+ "some->>" nil
+ (lambda (init &rest forms) (cljbang--some-thread init forms nil)))
 
 (cljbang--register-macro
  "when" nil

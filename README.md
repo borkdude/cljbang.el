@@ -222,10 +222,11 @@ called through `:as-alias`. Disable those warnings in
 Cljbang has these special forms:
 
 ```
-def defn defn- defmacro fn let set! if do try ns require quote comment
+def defn defn- defmacro fn let loop recur set! if do try ns require quote comment
 ```
 
-Clojure treats only `def`, `if`, `do`, `set!`, `quote` and `try` as special. The
+Clojure treats only `def`, `if`, `do`, `set!`, `quote`, `try`, `loop` and
+`recur` as special. The
 rest are macros there, and could become macros here too once there is a
 syntax quote to write them with.
 
@@ -246,7 +247,8 @@ using `list` and `cons`:
 These ship as macros rather than compiler support:
 
 ```
-when cond if-let when-let doseq dotimes -> ->> with-out-str time
+when cond case if-let when-let doseq dotimes -> ->> some-> some->>
+with-out-str time
 ```
 
 ### Functions
@@ -254,11 +256,23 @@ when cond if-let when-let doseq dotimes -> ->> with-out-str time
 Supported functions:
 
 ```
-+ - * / mod = not= < > <= >= inc dec not odd? even? zero?
-first second rest last nth count get contains? conj assoc
-map filter remove reduce concat sort str pr-str println prn name subs
++ - * / mod = not= < > <= >= inc dec not odd? even? zero? pos? neg?
+first second rest last nth count get contains? conj assoc seq vec
+map filter remove reduce concat sort sort-by str pr-str println prn name subs
+mapv mapcat into range take drop take-while drop-while distinct
+some every? empty? apply partial comp complement constantly
+keys vals merge dissoc select-keys update get-in assoc-in update-in
 re-pattern re-find re-matches re-seq
 hash-map hash-set throw ex-info ex-message ex-data ex-cause load-file
+atom deref reset! swap!
+keyword symbol nil? some? map? vector? fn? symbol? keyword?
+string? number? integer? int?
+```
+
+An atom derefs with `@` as well as `deref`:
+
+```clojure
+(let [a (atom 0)] (swap! a inc) @a)   ;; => 1
 ```
 
 `clojure.string` is available as `str` without a `require`:
@@ -325,6 +339,10 @@ Lisp semantics:
 (try (el/car 1)                        ;; catch takes an elisp error symbol,
   (catch wrong-type-argument e e))     ;;    where Clojure writes Exception
 
+(into {} [[:a 1]])     ;; an error. A map and a set are both hash tables,
+                       ;;    so conj cannot tell assoc from adding the pair
+(symbol? :a)           ;; => nil, a keyword is a symbol in elisp, not here
+
 (get '((:a . 1)) :a)   ;; => 1, an alist reads as a map
 (get '((1 2) (3 4)) 1) ;; => (2), and so does a list of lists. Clojure
                        ;;    finds nothing here, but elisp uses lists for
@@ -344,6 +362,7 @@ Not implemented:
 - Syntax quote. Macros must build expansions with `list` and `cons`.
 - `:strs`, `:syms` and namespaced `:keys` destructuring.
 - The `:while` modifier in `doseq`.
+- `recur` in a function body, and the check that it sits in tail position.
 - Protocols and multimethods.
 
 ## Benchmarks
