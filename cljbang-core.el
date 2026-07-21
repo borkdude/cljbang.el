@@ -39,9 +39,7 @@
   (let ((key (or ns (cljbang--current-ns) cljbang--no-ns)))
     (or (gethash key cljbang--ns-state)
         (puthash key
-                 (list :aliases nil
-                       :vars (make-hash-table :test #'equal)
-                       :macros (make-hash-table :test #'equal))
+                 (list :aliases nil :vars (make-hash-table :test #'equal))
                  cljbang--ns-state))))
 
 (defun cljbang--ns-aliases (&optional ns)
@@ -69,37 +67,6 @@
 (defun cljbang--interned-as (sym)
   "The (NAMESPACE . NAME) SYM was interned as, or nil."
   (gethash sym (cljbang--interned-table)))
-
-;; A macro belongs to the namespace that defined it, the way a var does.
-;; The ones cljbang ships live in a namespace of their own, so a template
-;; can name one there and a macro of that name elsewhere cannot take it.
-;; An unqualified name finds them once the current namespace has no such
-;; macro, which is what makes them reachable without a require.
-
-(defconst cljbang--core-ns "cljbang.core"
-  "Namespace of the macros cljbang defines itself.")
-
-(defun cljbang--ns-macro-table (&optional ns)
-  (plist-get (cljbang--ns-entry ns) :macros))
-
-(defun cljbang--register-builtin-macro (name expander)
-  (puthash name expander (cljbang--ns-macro-table cljbang--core-ns))
-  nil)
-
-(defun cljbang--register-macro (name ns expander)
-  "Register EXPANDER as the macro NAME, in NS or outside any namespace."
-  (puthash name expander (cljbang--ns-macro-table ns))
-  nil)
-
-(defun cljbang--macro-function (sym)
-  "Expander registered for SYM here or in the namespace it names, or nil."
-  (let ((name (symbol-name sym)))
-    (if (string-search "/" name)
-        (pcase-let ((`(,ns ,n) (split-string name "/")))
-          (gethash n (cljbang--ns-macro-table
-                      (or (cdr (assq (intern ns) (cljbang--ns-aliases))) ns))))
-      (or (gethash name (cljbang--ns-macro-table))
-          (gethash name (cljbang--ns-macro-table cljbang--core-ns))))))
 
 (defmacro cljbang--with-ns (ns &rest body)
   "Run BODY with NS as the current namespace, restoring it afterwards."

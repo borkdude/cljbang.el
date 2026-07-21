@@ -84,6 +84,16 @@
 ;; ns-name with dots as dashes.  The munge doubles as interop:
 ;; (magit/status) calls elisp `magit-status'.
 
+(defconst cljbang--core-macros
+  '((when . cljbang-core-when) (cond . cljbang-core-cond)
+    (case . cljbang-core-case) (if-let . cljbang-core-if-let)
+    (when-let . cljbang-core-when-let) (doseq . cljbang-core-doseq)
+    (dotimes . cljbang-core-dotimes) (-> . cljbang-core->)
+    (->> . cljbang-core->>) (some-> . cljbang-core-some->)
+    (some->> . cljbang-core-some->>) (with-out-str . cljbang-core-with-out-str)
+    (time . cljbang-core-time))
+  "Clojure name -> the elisp symbol a macro cljbang ships is interned as.")
+
 (defconst cljbang--ns-default-aliases
   '((str . "clojure.string")))
 
@@ -541,10 +551,9 @@ carries a host name, the way Clojure leaves interop alone."
      ;; expands would take its place.  A special form or a macro cannot be
      ;; taken that way, being looked up before any var, so it stays as it is
      ((alist-get sym cljbang--core-fns))
-     ;; a macro cljbang ships is named in its own namespace, so a macro of
-     ;; that name where this one expands cannot take its place
-     ((gethash name (cljbang--ns-macro-table cljbang--core-ns))
-      (intern (concat cljbang--core-ns "/" name)))
+     ;; a macro cljbang ships has an interned name of its own, so a macro
+     ;; of that name where this one expands cannot take its place
+     ((alist-get sym cljbang--core-macros))
      ((cljbang--macro-function sym) sym)
      ((cljbang--current-ns)
       (intern (concat (cljbang--munge-ns (cljbang--current-ns)) "-" name)))
@@ -794,6 +803,26 @@ Returns a list of forms, looping when a recur asks for it."
         ((cljbang--qualified sym))
         (t sym)))
 
+;; A macro is interned like a var, so it is namespaced by the same munge
+;; and a macro of one namespace cannot be seen from another.  The expander
+;; hangs off the symbol rather than its function cell, since it takes and
+;; returns cljbang forms rather than elisp ones.
+
+(defun cljbang--register-macro (sym expander)
+  "Register EXPANDER as the macro named by the elisp symbol SYM."
+  (put sym 'cljbang-macro expander)
+  nil)
+
+(defun cljbang--macro-function (sym)
+  "Expander for SYM, resolved as any other name is, or nil.
+Resolved first, so a macro of the namespace shadows one cljbang ships,
+as a defn of that name shadows a core function.  The bare symbol comes
+last, which finds a macro defined outside any namespace."
+  (get (or (cljbang--resolve-name sym)
+           (alist-get sym cljbang--core-macros)
+           sym)
+       'cljbang-macro))
+
 (defun cljbang--resolve-name (sym)
   "The elisp symbol SYM names, or nil when nothing here names one.
 Clojure's resolve, over elisp's flat symbols: el/ gives a host name, a
@@ -942,11 +971,8 @@ magti/status without complaining about magit/status."
                     (fn (cljbang--compile-fn tail env)))
          ;; registered now, so the rest of this file can use it, and
          ;; emitted too, so a compiled file registers it again on load
-         (cljbang--register-macro (symbol-name name) (cljbang--current-ns)
-                                  (eval fn t))
-         `(progn (cljbang--register-macro ,(symbol-name name)
-                                          ,(cljbang--current-ns) ,fn)
-                 ',name*)))
+         (cljbang--register-macro name* (eval fn t))
+         `(progn (put ',name* 'cljbang-macro ,fn) ',name*)))
       ((or 'defn 'defn-)
        (pcase-let* ((`(,name . ,rest) (cdr form))
                     (`(,doc ,tail) (cljbang--split-docstring rest))
@@ -1284,12 +1310,12 @@ happens once unless RELOAD is non-nil."
 
 ;; neither of these needs compiler support, they are just macros.  The
 ;; expansion is cljbang code, so it goes through the compiler in turn.
-(cljbang--register-builtin-macro
- "->"
+(cljbang--register-macro
+ 'cljbang-core->
  (lambda (init &rest forms) (cljbang--thread init forms t)))
 
-(cljbang--register-builtin-macro
- "->>"
+(cljbang--register-macro
+ 'cljbang-core->>
  (lambda (init &rest forms) (cljbang--thread init forms nil)))
 
 ;; the constants are not evaluated, so they are quoted into the test.  A
@@ -1321,24 +1347,24 @@ happens once unless RELOAD is non-nil."
                                               (list 'cljbang--map-literal
                                                     :value val))))))))))
 
-(cljbang--register-builtin-macro
- "case"
+(cljbang--register-macro
+ 'cljbang-core-case
  (lambda (expr &rest clauses) (cljbang--case expr clauses)))
 
-(cljbang--register-builtin-macro
- "some->"
+(cljbang--register-macro
+ 'cljbang-core-some->
  (lambda (init &rest forms) (cljbang--some-thread init forms t)))
 
-(cljbang--register-builtin-macro
- "some->>"
+(cljbang--register-macro
+ 'cljbang-core-some->>
  (lambda (init &rest forms) (cljbang--some-thread init forms nil)))
 
-(cljbang--register-builtin-macro
- "when"
+(cljbang--register-macro
+ 'cljbang-core-when
  (lambda (test &rest body) (list 'if test (cons 'do body))))
 
-(cljbang--register-builtin-macro
- "cond"
+(cljbang--register-macro
+ 'cljbang-core-cond
  (lambda (&rest clauses)
    (when (cl-oddp (length clauses))
      (error "cljbang: cond needs an even number of forms"))
@@ -1363,12 +1389,12 @@ happens once unless RELOAD is non-nil."
                 (list 'let (vector (aref binding 0) test) then)
                 else))))
 
-(cljbang--register-builtin-macro
- "if-let"
+(cljbang--register-macro
+ 'cljbang-core-if-let
  (lambda (binding then &optional else) (cljbang--if-let binding then else)))
 
-(cljbang--register-builtin-macro
- "when-let"
+(cljbang--register-macro
+ 'cljbang-core-when-let
  (lambda (binding &rest body) (cljbang--if-let binding (cons 'do body) nil)))
 
 ;; seq-do rather than dolist, since the binding is a cljbang pattern and
@@ -1416,20 +1442,20 @@ happens once unless RELOAD is non-nil."
                 (list 'set! i (list 'inc i)))
           nil)))
 
-(cljbang--register-builtin-macro
- "doseq"
+(cljbang--register-macro
+ 'cljbang-core-doseq
  (lambda (bindings &rest body) (cljbang--doseq bindings body)))
 
-(cljbang--register-builtin-macro
- "dotimes"
+(cljbang--register-macro
+ 'cljbang-core-dotimes
  (lambda (binding &rest body) (cljbang--dotimes binding body)))
 
-(cljbang--register-builtin-macro
- "with-out-str"
+(cljbang--register-macro
+ 'cljbang-core-with-out-str
  (lambda (&rest body) (cons 'el/with-output-to-string body)))
 
-(cljbang--register-builtin-macro
- "time"
+(cljbang--register-macro
+ 'cljbang-core-time
  (lambda (expr)
    (let ((start (gensym "cljbang-start-"))
          (val (gensym "cljbang-val-")))

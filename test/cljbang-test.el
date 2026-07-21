@@ -380,14 +380,14 @@ leaves if and do alone.  A var of that name cannot take one."
   (should (equal '(fn [x] x) (cljbang-test--eval "`(fn [~'x] ~'x)")))
   (cljbang--set-current-ns nil))
 
-(ert-deftest cljbang-test-syntax-quote-names-a-builtin-macro-in-its-namespace ()
+(ert-deftest cljbang-test-syntax-quote-names-a-builtin-macro-outright ()
   "As Clojure writes clojure.core/when, so a macro of that name elsewhere
 cannot take it."
   (cljbang-test--eval "(ns sqmac)")
-  (should (eq 'cljbang.core/when (cljbang-test--eval "`when")))
-  (should (eq 'cljbang.core/-> (cljbang-test--eval "`->")))
-  (should (equal '(cljbang.core/when t 1) (cljbang-test--eval "`(when true 1)")))
-  (should (eq :y (cljbang-test--eval "(cljbang.core/when true :y)")))
+  (should (eq 'cljbang-core-when (cljbang-test--eval "`when")))
+  (should (eq 'cljbang-core-> (cljbang-test--eval "`->")))
+  (should (equal '(cljbang-core-when t 1) (cljbang-test--eval "`(when true 1)")))
+  (should (eq :y (cljbang-test--eval "(cljbang-core-when true :y)")))
   (cljbang--set-current-ns nil))
 
 (ert-deftest cljbang-test-a-builtin-macro-in-a-template-is-not-captured ()
@@ -585,12 +585,21 @@ cannot take it."
   (should (eq :a (cljbang-test--eval "(cond (= 1 1) :a)")))
   (cljbang--set-current-ns nil))
 
-(ert-deftest cljbang-test-macros-live-in-the-namespace-state ()
+(ert-deftest cljbang-test-a-macro-is-interned-like-a-var ()
+  "The munged symbol carries the expander, so the namespace comes with it."
   (cljbang-test--eval "(ns macstate) (defmacro mine [x] x)")
-  (should (gethash "mine" (cljbang--ns-macro-table "macstate")))
-  (should (null (gethash "mine" (cljbang--ns-macro-table cljbang--core-ns))))
-  (should (gethash "when" (cljbang--ns-macro-table cljbang--core-ns)))
+  (should (get 'macstate-mine 'cljbang-macro))
+  (should (eq 'macstate-mine (cljbang--resolve-name 'mine)))
+  (should (null (get 'mine 'cljbang-macro)))
+  (should (get 'cljbang-core-when 'cljbang-macro))
   (cljbang--set-current-ns nil))
+
+(ert-deftest cljbang-test-a-macro-of-the-namespace-shadows-a-builtin ()
+  "As a defn named like a core function shadows that function."
+  (cljbang-test--eval "(ns shadowwhen) (defmacro when [& xs] :mine)")
+  (should (eq :mine (cljbang-test--eval "(when true :not-this)")))
+  (cljbang--set-current-ns nil)
+  (should (eq :y (cljbang-test--eval "(when true :y)"))))
 
 (ert-deftest cljbang-test-defmacro-in-a-namespace ()
   (should (= 40 (cljbang-test--eval "(ns mns) (defmacro m1 [x] (list '* x 10)) (m1 4)")))
@@ -1342,7 +1351,7 @@ cannot take it."
         (progn
           (write-region "(ns cachedmac)\n(defmacro dbl [x] (list '* x 2))\n" nil f nil 'quiet)
           (cljbang-load-file f)
-          (remhash "dbl" (cljbang--ns-macro-table "cachedmac"))
+          (put 'cachedmac-dbl 'cljbang-macro nil)
           (load (cljbang--cache-file f) nil t)   ; only the cache
           (cljbang--set-current-ns nil)
           (should (= 42 (cljbang-test--eval "(cachedmac/dbl 21)"))))
@@ -1368,12 +1377,12 @@ registered again when the cache loads."
           (cljbang-load-file (expand-file-name "aotuser.clj" dir))
           (should (equal [42 10] (aotuser-go)))
           ;; forget the macro, then load only the caches
-          (remhash "dbl" (cljbang--ns-macro-table "aotlib"))
+          (put 'aotlib-dbl 'cljbang-macro nil)
           (load (cljbang--cache-file (expand-file-name "aotlib.clj" dir)) nil t)
           (load (cljbang--cache-file (expand-file-name "aotuser.clj" dir)) nil t)
           (cljbang--set-current-ns nil)
           (should (equal [42 10] (aotuser-go)))
-          (should (gethash "dbl" (cljbang--ns-macro-table "aotlib"))))
+          (should (get 'aotlib-dbl 'cljbang-macro)))
       (delete-directory dir t)
       (cljbang--set-current-ns nil))))
 
