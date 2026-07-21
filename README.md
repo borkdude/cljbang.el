@@ -1,18 +1,18 @@
-# cljbang
+# Cljbang
 
-A Clojure-like that runs as Emacs Lisp.
+A Clojure-like language that runs as Emacs Lisp.
 
 Cljbang (`clj!`) compiles Clojure forms to Emacs Lisp forms and evaluates them in the
 running Emacs. There is no subprocess, no transpiled text, and no runtime
 beyond `cljbang.el` itself.
 
-This project is heavily influenced by how I wrote [squint](https://squint-cljs.github.io/squint/) and adopts its philosophy to writing a Clojure-like:
+This project is heavily influenced by how I wrote [Squint](https://squint-cljs.github.io/squint/) and adopts its philosophy to writing a Clojure-like:
 
-- Host and its data structures are embraced: interop should be dead easy without transforming between islands
-- Light-weight: the compiler step should be fast such that using cljbang doesn't incur a lot of overhead compared to using elisp directly.
+- Host and its data structures are embraced: interop should be first class without transforming between islands
+- Light-weight: the compiler step should be fast such that using Cljbang doesn't incur a lot of overhead compared to using elisp directly.
 - Performance first: compiled output should run fast, in the same ballpark as elisp
 
-## Install
+## Installation
 
 Requires Emacs 28.1 or later.
 
@@ -95,6 +95,39 @@ From cljbang code, reach them with the namespace:
 The `ns` is in effect only while the file loads, so it does not leak into
 whatever you evaluate next.
 
+### Requiring
+
+A `:require` loads what it names. Cljbang looks for a `.clj` file first,
+relative to the requiring file and then along `cljbang-load-path`, and
+falls back to loading an elisp feature of that name.
+
+```clojure
+;; lib/b.clj
+(ns lib.b)
+(defn hello [x] (str "hello from b: " x))
+```
+
+```clojure
+;; app_a.clj
+(ns app.a (:require [lib.b :as b]))
+(defn run [] (b/hello "a"))     ;; => "hello from b: a"
+```
+
+Namespaces map to file names as in Clojure, so `lib.some-thing` is
+`lib/some_thing.clj`.
+
+Requiring an Emacs package loads it, and the alias saves you the prefix:
+
+```clojure
+(ns my.config (:require [magit :as m]))
+(m/status)                       ;; calls magit-status
+```
+
+A require happens once, so cycles terminate. A missing elisp feature is
+not an error, since an alias may name a symbol prefix rather than
+something loadable. Use `:as-alias` to name a namespace without loading
+it, as in Clojure.
+
 The same munging works in reverse, which is what makes ns-qualified syntax
 the natural way to call an Emacs package:
 
@@ -152,8 +185,6 @@ hash-map hash-set load-file
 join split replace upper-case lower-case capitalize trim blank?
 ```
 
-Anything not listed is an elisp call. That is the point, not a gap.
-
 Map and set literals, destructuring (sequential and associative, nested,
 in `let` and in fn params), and sets, maps, keywords and vectors called as
 functions.
@@ -173,7 +204,7 @@ Anonymous function literals, with `%`, `%1`, `%2` and `%&`:
 
 ## Differences from Clojure
 
-Host semantics win where they conflict, as in squint.
+Host semantics win where they conflict, unless otherwise noted, like in Squint.
 
 - `/` is elisp division: integers, no ratios
 - characters are integers, so `(nth "abc" 0)` is `97`
@@ -185,8 +216,8 @@ Host semantics win where they conflict, as in squint.
 ## Test
 
 ```
-make test
-make compile
+bb test
+bb compile
 ```
 
 ## License

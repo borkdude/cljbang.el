@@ -23,8 +23,12 @@ jobs:
         with:
           version: ${{ matrix.emacs_version }}
 
+      - uses: DeLaGuardo/setup-clojure@master
+        with:
+          bb: latest
+
       - name: Byte-compile
-        run: make compile
+        run: bb compile
 
       - name: Test
-        run: make test
+        run: bb test

@@ -354,6 +354,51 @@
   (should (equal "a,b" (cljbang-test--eval "(str/join \",\" [\"a\" \"b\"])")))
   (setq cljbang--current-ns nil))
 
+(ert-deftest cljbang-test-ns->file ()
+  "Namespaces map to file names the way Clojure spells them."
+  (should (equal "lib/b.clj" (cljbang--ns->file "lib.b")))
+  (should (equal "lib/some_thing.clj" (cljbang--ns->file "lib.some-thing"))))
+
+(ert-deftest cljbang-test-require-loads-clj-file ()
+  "A :require pulls in the .clj file it names, without loading it first."
+  (clrhash cljbang--loaded-ns)
+  (let ((dir (expand-file-name "test/requires/" cljbang-test--root)))
+    (cljbang-load-file (expand-file-name "app_a.clj" dir))
+    (should (fboundp 'lib-b-hello))
+    (should (equal "hello from b: a" (app-a-run))))
+  (setq cljbang--current-ns nil))
+
+(ert-deftest cljbang-test-require-loads-elisp-feature ()
+  (clrhash cljbang--loaded-ns)
+  (cljbang-test--eval "(ns reqfeat (:require [subr-x :as sx]))")
+  (should (featurep 'subr-x))
+  (setq cljbang--current-ns nil))
+
+(ert-deftest cljbang-test-require-missing-feature-is-not-fatal ()
+  "An alias may name a symbol prefix rather than something loadable."
+  (clrhash cljbang--loaded-ns)
+  (should (cljbang-test--eval "(ns reqmiss (:require [no-such-package-xyz :as n])) :ok"))
+  (setq cljbang--current-ns nil))
+
+(ert-deftest cljbang-test-require-skips-builtin-namespaces ()
+  "clojure.string is cljbang's own, not an elisp feature to load."
+  (clrhash cljbang--loaded-ns)
+  (should (equal "a,b" (cljbang-test--eval
+                        "(ns reqstr (:require [clojure.string :as str])) (str/join \",\" [\"a\" \"b\"])")))
+  (setq cljbang--current-ns nil))
+
+(ert-deftest cljbang-test-as-alias-does-not-load ()
+  (clrhash cljbang--loaded-ns)
+  (cljbang-test--eval "(ns reqnoload (:require [lib.b :as-alias bb]))")
+  (should-not (gethash "lib.b" cljbang--loaded-ns))
+  (setq cljbang--current-ns nil))
+
+(ert-deftest cljbang-test-require-cycle-terminates ()
+  (clrhash cljbang--loaded-ns)
+  (let ((dir (expand-file-name "test/requires/" cljbang-test--root)))
+    (should (cljbang-load-file (expand-file-name "cyc_a.clj" dir))))
+  (setq cljbang--current-ns nil))
+
 (ert-deftest cljbang-test-as-alias-is-accepted ()
   "el/ resolves to the host whatever an alias claims."
   (cljbang-test--eval "(ns withalias (:require [cljbang.el :as-alias el]))")

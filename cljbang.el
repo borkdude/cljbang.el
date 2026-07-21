@@ -199,6 +199,44 @@ which are vector-like, out of the lookup branches."
 (defun cljbang--munge-ns (ns)
   (string-replace "." "-" ns))
 
+;;; Loading what :require names
+
+(defvar cljbang-load-path nil
+  "Directories searched for the .clj files named in a :require.
+The directory of the file being loaded is searched first.")
+
+(defvar cljbang--loaded-ns (make-hash-table :test #'equal)
+  "Namespaces already loaded, so a :require happens once.")
+
+(defvar cljbang--load-file-dir nil
+  "Directory of the file currently loading, searched before the load path.")
+
+(defun cljbang--ns->file (ns)
+  "Relative file name for namespace NS, spelled as Clojure spells it."
+  (concat (string-replace "-" "_" (string-replace "." "/" ns)) ".clj"))
+
+(defun cljbang--find-ns-file (ns)
+  "A readable .clj file for NS on the load path, or nil."
+  (let ((rel (cljbang--ns->file ns)))
+    (seq-some (lambda (dir)
+                (let ((f (expand-file-name rel dir)))
+                  (and (file-readable-p f) f)))
+              (delq nil (cons cljbang--load-file-dir cljbang-load-path)))))
+
+(defun cljbang--require-ns (ns)
+  "Load NS: a .clj file when one is on the load path, else an elisp feature.
+A missing elisp feature is not an error, since an alias may name a plain
+symbol prefix rather than something loadable."
+  (unless (or (gethash ns cljbang--loaded-ns)
+              ;; namespaces cljbang implements itself
+              (rassoc ns cljbang--ns-aliases))
+    ;; marked before loading, so a cycle terminates
+    (puthash ns t cljbang--loaded-ns)
+    (let ((file (cljbang--find-ns-file ns)))
+      (if file
+          (cljbang-load-file file)
+        (require (intern ns) nil 'noerror)))))
+
 ;; Elisp spells the distinction Clojure draws with defn- : one dash for
 ;; the public API, two for what is internal to a package.  Public is the
 ;; common case, and it is what ns-qualified interop has to produce to
@@ -505,14 +543,16 @@ key is the pattern and the value is the map key to look up."
          (dolist (clause (cddr form))
            (when (and (consp clause) (eq (car clause) :require))
              (dolist (spec (cdr clause))
-               ;; :as-alias behaves like :as here, there being nothing to
-               ;; load.  el/ resolves to the host environment either way.
                (let* ((spec (if (vectorp spec) (append spec nil) (list spec)))
-                      (as (or (cadr (memq :as spec))
-                              (cadr (memq :as-alias spec)))))
+                      (required (symbol-name (car spec)))
+                      (alias-only (cadr (memq :as-alias spec)))
+                      (as (or (cadr (memq :as spec)) alias-only)))
                  (when as
-                   (setf (alist-get as cljbang--ns-alias-map)
-                         (symbol-name (car spec))))))))
+                   (setf (alist-get as cljbang--ns-alias-map) required))
+                 ;; :as-alias names a namespace without loading it, as in
+                 ;; Clojure.  Plain :require loads.
+                 (unless alias-only
+                   (cljbang--require-ns required))))))
          `(setq cljbang--current-ns ,name)))
       ('def
        (pcase-let* ((`(,name ,val) (cdr form))
@@ -712,7 +752,9 @@ Returns the value of the last form."
                (buffer-string)))
         ;; an (ns ...) in the file takes effect during the load only,
         ;; like Clojure's load-file preserving the caller's *ns*
-        (cljbang--current-ns cljbang--current-ns))
+        (cljbang--current-ns cljbang--current-ns)
+        ;; a :require in this file resolves against this file's directory
+        (cljbang--load-file-dir (file-name-directory (expand-file-name file))))
     (cljbang-eval-string src)))
 
 ;;; Editor integration: eval-last-sexp that respects clj! context
