@@ -32,6 +32,8 @@
 
 (defun clj2el-conj (coll x)
   (cond ((vectorp coll) (vconcat coll (vector x)))
+        ((hash-table-p coll)
+         (let ((h (copy-hash-table coll))) (puthash x x h) h))
         (t (cons x coll))))
 
 (defun clj2el-hash-map (&rest kvs)
@@ -65,10 +67,22 @@ Clojure's subs treats it as out of range, so reject it."
            (if i (substring s (1+ i)) s)))
         (t (error "clj2el: cannot take name of %S" x))))
 
+(defun clj2el-hash-set (&rest xs)
+  "Set of XS, a hash table mapping each element to itself."
+  (let ((h (make-hash-table :test #'equal)))
+    (dolist (x xs h) (puthash x x h))))
+
 (defun clj2el-get (m k &optional default)
   (cond ((hash-table-p m) (gethash k m default))
         ((vectorp m) (if (< k (length m)) (aref m k) default))
         (t default)))
+
+(defun clj2el-contains? (coll k)
+  "Whether COLL has key K.  For a vector K is an index, as in Clojure."
+  (cond ((hash-table-p coll)
+         (not (eq 'clj2el--absent (gethash k coll 'clj2el--absent))))
+        ((vectorp coll) (and (integerp k) (>= k 0) (< k (length coll))))
+        (t nil)))
 
 (defun clj2el-assoc (m k v)
   (let ((h (copy-hash-table m)))
@@ -113,6 +127,7 @@ Clojure's subs treats it as out of range, so reject it."
     (get . clj2el-get) (count . clj2el-count)
     (nth . clj2el-nth) (name . clj2el-name)
     (conj . clj2el-conj) (hash-map . clj2el-hash-map)
+    (hash-set . clj2el-hash-set) (contains? . clj2el-contains?)
     (assoc . clj2el-assoc)
     (subs . clj2el-subs)
     (load-file . clj2el-load-file)))
@@ -389,6 +404,8 @@ key is the pattern and the value is the map key to look up."
     (pcase (car form)
       ('clj2el--map-literal
        `(clj2el-hash-map ,@(clj2el--compile-body (cdr form) env)))
+      ('clj2el--set-literal
+       `(clj2el-hash-set ,@(clj2el--compile-body (cdr form) env)))
       ('quote form)
       ('comment nil)
       ('ns
@@ -473,7 +490,8 @@ key is the pattern and the value is the map key to look up."
 (defun clj2el-eval-string (s)
   "Read Clojure source S, compile each top-level form, eval in-process."
   (let (result)
-    (dolist (f (clj2el--splice-braces (clj2el--read-all s)) result)
+    (dolist (f (clj2el--splice-braces (clj2el--read-all (clj2el--rewrite-sets s)))
+               result)
       (setq result (eval (clj2el-compile f) t)))))
 
 ;;; Embedded Clojure: elisp's reader already accepts most Clojure
@@ -486,6 +504,34 @@ key is the pattern and the value is the map key to look up."
 ;;; -- the delimiters survive, glued to their neighbours.  Splitting them
 ;;; back off and reducing the result gives (clj2el--map-literal k v ...),
 ;;; which the compiler tells apart from a call form.
+
+(defconst clj2el--set-marker 'clj2el--set
+  "Symbol #{ is rewritten to, so the elisp reader accepts a set literal.")
+
+(defun clj2el--rewrite-sets (s)
+  "Rewrite #{ in S to a marker symbol the elisp reader accepts.
+Occurrences inside a string are left alone.  Needs the source text, so
+it applies to files and inline evaluation but not to `clj!'."
+  (with-temp-buffer
+    (insert s)
+    (let ((table (make-syntax-table)))
+      (modify-syntax-entry ?\" "\"" table)
+      (modify-syntax-entry ?\\ "\\" table)
+      (set-syntax-table table))
+    (goto-char (point-min))
+    (let (positions)
+      (while (search-forward "#{" nil t)
+        ;; syntax-ppss moves point, so keep the search position
+        (let ((beg (match-beginning 0)))
+          (unless (save-excursion (nth 3 (syntax-ppss beg)))
+            (push beg positions))
+          (goto-char (+ beg 2))))
+      ;; last match first, so the earlier positions stay valid
+      (dolist (pos positions)
+        (goto-char pos)
+        (delete-char 1)
+        (insert (symbol-name clj2el--set-marker))))
+    (buffer-string)))
 
 (defun clj2el--lex-braces (name)
   "Split symbol NAME into tokens, exposing { and } as separate symbols."
@@ -521,14 +567,19 @@ key is the pattern and the value is the map key to look up."
         (t form)))
 
 (defun clj2el--splice-braces (forms)
-  "Reduce { } tokens in FORMS into (clj2el--map-literal ...) forms."
-  (let ((stack (list nil)))
+  "Reduce { } tokens in FORMS into map and set literal forms."
+  (let ((stack (list nil)) kinds)
     (dolist (tok (mapcan #'clj2el--brace-tokens forms))
       (cond
-       ((eq tok '\{) (push nil stack))
+       ((eq tok '\{)
+        ;; #{ arrives here as the marker symbol followed by {
+        (let ((set? (eq (car (car stack)) clj2el--set-marker)))
+          (when set? (setcar stack (cdr (car stack))))
+          (push (if set? 'clj2el--set-literal 'clj2el--map-literal) kinds)
+          (push nil stack)))
        ((eq tok '\})
         (unless (cdr stack) (error "clj2el: unbalanced } in Clojure form"))
-        (let ((m (cons 'clj2el--map-literal (nreverse (pop stack)))))
+        (let ((m (cons (pop kinds) (nreverse (pop stack)))))
           (push m (car stack))))
        (t (push (clj2el--splice-form tok) (car stack)))))
     (when (cdr stack) (error "clj2el: unbalanced { in Clojure form"))
