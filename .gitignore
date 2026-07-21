@@ -1,17 +1,2 @@
-.shadow-cljs
-node_modules
-web/resources/public/js
-
-# Clojure
-/target
-/classes
-/checkouts
-profiles.clj
-pom.xml
-pom.xml.asc
-*.jar
-*.class
-/.lein-*
-/.nrepl-port
-/.prepl-port
-/.cpcache
+*.elc
+.clj-kondo/.cache/

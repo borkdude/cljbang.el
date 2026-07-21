@@ -1,7 +1,7 @@
 ;;; bench-compile.el --- clj pipeline vs direct elisp, one large namespace -*- lexical-binding: t; -*-
 
 (add-to-list 'load-path (file-name-directory load-file-name))
-(require 'clj2el-core)
+(require 'cljbang)
 
 (defmacro bench--ms (&rest body)
   `(let ((bench--start (current-time)))
@@ -38,8 +38,8 @@
        forms compiled el-forms macro-forms expansion
        ;; string pipeline: source text in, values out
        (t-parse (bench--ms
-                 (setq forms (clj2el--splice-braces (clj2el--read-all clj-src)))))
-       (t-compile (bench--ms (setq compiled (mapcar #'clj2el-compile forms))))
+                 (setq forms (cljbang--splice-braces (cljbang--read-all clj-src)))))
+       (t-compile (bench--ms (setq compiled (mapcar #'cljbang-compile forms))))
        (t-eval (bench--ms (dolist (f compiled) (eval f t))))
        ;; clj! macro path: forms already read by the elisp reader
        (t-m-read (bench--ms (setq macro-forms (bench--read-all macro-src))))

@@ -1,1 +1,0 @@
-{:paths ["src"] :deps {borkdude/edamame {:mvn/version "1.3.20"}}}

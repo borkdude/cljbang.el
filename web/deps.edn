@@ -1,7 +1,0 @@
-{:paths ["src" "resources"]
- :deps {io.github.borkdude/clj2el {:local/root ".."}
-        borkdude/edamame {:mvn/version "1.3.20"}}
- :aliases
- {:dev
-  {:extra-paths ["dev"]
-   :extra-deps  {thheller/shadow-cljs {:mvn/version "2.22.6"}}}}}

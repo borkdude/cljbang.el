@@ -1,9 +1,0 @@
-{
-  "dependencies": {
-    "@nextjournal/lang-clojure": "^1.0.0",
-    "codemirror": "^6.0.1"
-  },
-  "devDependencies": {
-    "shadow-cljs": "^2.21.0"
-  }
-}

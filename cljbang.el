@@ -1,55 +1,72 @@
-;;; clj2el-core.el --- Clojure -> elisp forms, in-memory, no transpiled text -*- lexical-binding: t; -*-
+;;; cljbang.el --- Clojure that runs as Emacs Lisp -*- lexical-binding: t; -*-
 
-;; POC: read Clojure source with the elisp reader, compile Clojure
-;; special forms to elisp forms, and eval them directly in the running
-;; Emacs.  No elisp source text is ever printed or re-read.
+;; Version: 0.1.0
+;; Package-Requires: ((emacs "28.1"))
+;; Homepage: https://github.com/borkdude/cljbang
+;; Keywords: languages, lisp
+
+;;; Commentary:
+
+;; Reads Clojure source with the elisp reader, compiles Clojure special
+;; forms to elisp forms, and evaluates them in the running Emacs.  No
+;; elisp source text is ever printed or re-read.
+;;
+;; Clojure lives in an elisp buffer inside the clj! macro, in a .clj file
+;; loaded with `cljbang-load-file', or is evaluated form by form with
+;; `cljbang-eval-last-sexp'.
+;;
+;; Interop is direct: a name cljbang does not define compiles to a plain
+;; elisp call.  el/ reaches the host environment explicitly, the way js/
+;; does in ClojureScript.
+
+;;; Code:
 
 (require 'cl-lib)
 (require 'seq)
 
 ;;; Runtime: minimal Clojure core on top of elisp
 
-(defun clj2el-first (coll)
+(defun cljbang-first (coll)
   (if (seq-empty-p coll) nil (seq-elt coll 0)))
 
-(defun clj2el-rest (coll)
+(defun cljbang-rest (coll)
   (seq-into (seq-drop coll 1) 'list))
 
-(defun clj2el-second (coll)
-  (clj2el-first (clj2el-rest coll)))
+(defun cljbang-second (coll)
+  (cljbang-first (cljbang-rest coll)))
 
 ;; a set, map or keyword can be passed where a function is expected, as
-;; in (filter #{1 3} xs).  clj2el--fn resolves that once per call rather
+;; in (filter #{1 3} xs).  cljbang--fn resolves that once per call rather
 ;; than once per element, so the ordinary case stays a bare funcall.
 
-(defun clj2el--fn (f)
+(defun cljbang--fn (f)
   "F as something funcall can take, wrapping a set, map or keyword."
-  (if (functionp f) f (lambda (&rest args) (apply #'clj2el--invoke f args))))
+  (if (functionp f) f (lambda (&rest args) (apply #'cljbang--invoke f args))))
 
-(defun clj2el-map (f coll)
-  (mapcar (clj2el--fn f) (seq-into coll 'list)))
+(defun cljbang-map (f coll)
+  (mapcar (cljbang--fn f) (seq-into coll 'list)))
 
-(defun clj2el-filter (pred coll)
-  (seq-filter (clj2el--fn pred) (seq-into coll 'list)))
+(defun cljbang-filter (pred coll)
+  (seq-filter (cljbang--fn pred) (seq-into coll 'list)))
 
-(defun clj2el-reduce (f init coll)
-  (seq-reduce (clj2el--fn f) (seq-into coll 'list) init))
+(defun cljbang-reduce (f init coll)
+  (seq-reduce (cljbang--fn f) (seq-into coll 'list) init))
 
-(defun clj2el-count (coll)
+(defun cljbang-count (coll)
   (if (hash-table-p coll) (hash-table-count coll) (seq-length coll)))
 
-(defun clj2el-conj (coll x)
+(defun cljbang-conj (coll x)
   (cond ((vectorp coll) (vconcat coll (vector x)))
         ((hash-table-p coll)
          (let ((h (copy-hash-table coll))) (puthash x x h) h))
         (t (cons x coll))))
 
-(defun clj2el-hash-map (&rest kvs)
+(defun cljbang-hash-map (&rest kvs)
   (let ((h (make-hash-table :test #'equal)))
     (while kvs (puthash (pop kvs) (pop kvs) h))
     h))
 
-(defun clj2el-subs (s start &optional end)
+(defun cljbang-subs (s start &optional end)
   "Substring of S from START to END.
 Elisp's substring counts a negative index from the end of the string;
 Clojure's subs treats it as out of range, so reject it."
@@ -57,14 +74,14 @@ Clojure's subs treats it as out of range, so reject it."
     (error "String index out of range: %d" (if (< start 0) start end)))
   (substring s start end))
 
-(defun clj2el-nth (coll i &rest not-found)
+(defun cljbang-nth (coll i &rest not-found)
   "Element I of COLL.  Out of range is an error unless NOT-FOUND is given."
-  (cond ((and coll (>= i 0) (< i (clj2el-count coll))) (seq-elt coll i))
+  (cond ((and coll (>= i 0) (< i (cljbang-count coll))) (seq-elt coll i))
         (not-found (car not-found))
         ((null coll) nil)
         (t (error "Index out of bounds: %d" i))))
 
-(defun clj2el-name (x)
+(defun cljbang-name (x)
   "Name of keyword, symbol or string X, without colon or namespace."
   (cond ((stringp x) x)
         ;; a keyword is a symbol here, so both lose the colon then the ns
@@ -73,84 +90,84 @@ Clojure's subs treats it as out of range, so reject it."
                 (s (if (string-prefix-p ":" s) (substring s 1) s))
                 (i (string-search "/" s)))
            (if i (substring s (1+ i)) s)))
-        (t (error "clj2el: cannot take name of %S" x))))
+        (t (error "cljbang: cannot take name of %S" x))))
 
-(defun clj2el-hash-set (&rest xs)
+(defun cljbang-hash-set (&rest xs)
   "Set of XS, a hash table mapping each element to itself."
   (let ((h (make-hash-table :test #'equal)))
     (dolist (x xs h) (puthash x x h))))
 
-(defun clj2el-get (m k &optional default)
+(defun cljbang-get (m k &optional default)
   (cond ((hash-table-p m) (gethash k m default))
         ((vectorp m) (if (< k (length m)) (aref m k) default))
         (t default)))
 
-(defun clj2el--invoke (f &rest args)
+(defun cljbang--invoke (f &rest args)
   "Call F as Clojure does.
 Sets, maps and vectors look their argument up.  A keyword looks itself
 up in its argument.  Checking functionp first keeps byte-code objects,
 which are vector-like, out of the lookup branches."
   (cond ((functionp f) (apply f args))
-        ((or (hash-table-p f) (vectorp f)) (apply #'clj2el-get f args))
-        ((keywordp f) (apply #'clj2el-get (car args) f (cdr args)))
+        ((or (hash-table-p f) (vectorp f)) (apply #'cljbang-get f args))
+        ((keywordp f) (apply #'cljbang-get (car args) f (cdr args)))
         (t (apply f args))))
 
-(defun clj2el-contains? (coll k)
+(defun cljbang-contains? (coll k)
   "Whether COLL has key K.  For a vector K is an index, as in Clojure."
   (cond ((hash-table-p coll)
-         (not (eq 'clj2el--absent (gethash k coll 'clj2el--absent))))
+         (not (eq 'cljbang--absent (gethash k coll 'cljbang--absent))))
         ((vectorp coll) (and (integerp k) (>= k 0) (< k (length coll))))
         (t nil)))
 
-(defun clj2el-assoc (m k v)
+(defun cljbang-assoc (m k v)
   (let ((h (copy-hash-table m)))
     (puthash k v h)
     h))
 
-(defun clj2el--pr-str (x)
+(defun cljbang--pr-str (x)
   (cond ((null x) "nil")
         ((eq x t) "true")
         ((stringp x) x)
         ((hash-table-p x)
          (let (pairs)
            (maphash (lambda (k v)
-                      (push (concat (clj2el--pr-str k) " " (clj2el--pr-str v)) pairs))
+                      (push (concat (cljbang--pr-str k) " " (cljbang--pr-str v)) pairs))
                     x)
            (concat "{" (string-join (nreverse pairs) ", ") "}")))
         ((vectorp x)
-         (concat "[" (mapconcat #'clj2el--pr-str x " ") "]"))
+         (concat "[" (mapconcat #'cljbang--pr-str x " ") "]"))
         ((proper-list-p x)
-         (concat "(" (mapconcat #'clj2el--pr-str x " ") ")"))
+         (concat "(" (mapconcat #'cljbang--pr-str x " ") ")"))
         (t (format "%s" x))))
 
-(defun clj2el-str (&rest xs)
-  (mapconcat (lambda (x) (if (null x) "" (clj2el--pr-str x))) xs ""))
+(defun cljbang-str (&rest xs)
+  (mapconcat (lambda (x) (if (null x) "" (cljbang--pr-str x))) xs ""))
 
-(defun clj2el-println (&rest xs)
-  (princ (mapconcat #'clj2el--pr-str xs " "))
+(defun cljbang-println (&rest xs)
+  (princ (mapconcat #'cljbang--pr-str xs " "))
   (princ "\n")
   nil)
 
 ;;; Clojure name -> elisp function mapping
 
-(defconst clj2el--core-fns
+(defconst cljbang--core-fns
   ;; / is elisp division: integers, no ratios
   '((+ . +) (- . -) (* . *) (/ . /) (mod . mod)
-    (= . equal) (not= . clj2el-not=) (< . <) (> . >) (<= . <=) (>= . >=)
+    (= . equal) (not= . cljbang-not=) (< . <) (> . >) (<= . <=) (>= . >=)
     (inc . 1+) (dec . 1-) (not . not)
     (odd? . cl-oddp) (even? . cl-evenp) (zero? . zerop)
-    (first . clj2el-first) (second . clj2el-second) (rest . clj2el-rest)
-    (map . clj2el-map) (filter . clj2el-filter) (reduce . clj2el-reduce)
-    (str . clj2el-str) (println . clj2el-println)
-    (get . clj2el-get) (count . clj2el-count)
-    (nth . clj2el-nth) (name . clj2el-name)
-    (conj . clj2el-conj) (hash-map . clj2el-hash-map)
-    (hash-set . clj2el-hash-set) (contains? . clj2el-contains?)
-    (assoc . clj2el-assoc)
-    (subs . clj2el-subs)
-    (load-file . clj2el-load-file)))
+    (first . cljbang-first) (second . cljbang-second) (rest . cljbang-rest)
+    (map . cljbang-map) (filter . cljbang-filter) (reduce . cljbang-reduce)
+    (str . cljbang-str) (println . cljbang-println)
+    (get . cljbang-get) (count . cljbang-count)
+    (nth . cljbang-nth) (name . cljbang-name)
+    (conj . cljbang-conj) (hash-map . cljbang-hash-map)
+    (hash-set . cljbang-hash-set) (contains? . cljbang-contains?)
+    (assoc . cljbang-assoc)
+    (subs . cljbang-subs)
+    (load-file . cljbang-load-file)))
 
-(defun clj2el-not= (a b) (not (equal a b)))
+(defun cljbang-not= (a b) (not (equal a b)))
 
 ;;; Namespaced symbols: str/join etc.
 ;;
@@ -160,7 +177,7 @@ which are vector-like, out of the lookup branches."
 ;; (dots to dashes), the elisp package convention.  The munge doubles as
 ;; interop: (mylib/frob x) calls elisp `mylib--frob'.
 
-(defconst clj2el--ns-aliases
+(defconst cljbang--ns-aliases
   '((str . "clojure.string")))
 
 ;; Current namespace: (ns foo) makes subsequent defn/def intern munged
@@ -170,52 +187,52 @@ which are vector-like, out of the lookup branches."
 ;; later form can call an earlier defn even though nothing has been
 ;; evaluated yet.
 
-(defvar clj2el--current-ns nil
+(defvar cljbang--current-ns nil
   "Name of the current Clojure namespace (a string), or nil.")
 
-(defvar clj2el--ns-alias-map nil
+(defvar cljbang--ns-alias-map nil
   "Alist of alias symbol -> namespace name, from (ns ... (:require ... :as ...)).")
 
-(defvar clj2el--ns-vars (make-hash-table :test #'equal)
+(defvar cljbang--ns-vars (make-hash-table :test #'equal)
   "Namespace name -> hash table whose keys are var names defined there.")
 
-(defun clj2el--munge-ns (ns)
+(defun cljbang--munge-ns (ns)
   (string-replace "." "-" ns))
 
-(defun clj2el--ns-intern (name)
+(defun cljbang--ns-intern (name)
   "Munged elisp symbol for NAME in the current ns; records the var."
-  (if clj2el--current-ns
-      (let ((vars (or (gethash clj2el--current-ns clj2el--ns-vars)
-                      (puthash clj2el--current-ns
+  (if cljbang--current-ns
+      (let ((vars (or (gethash cljbang--current-ns cljbang--ns-vars)
+                      (puthash cljbang--current-ns
                                (make-hash-table :test #'equal)
-                               clj2el--ns-vars))))
+                               cljbang--ns-vars))))
         (puthash (symbol-name name) t vars)
-        (intern (concat (clj2el--munge-ns clj2el--current-ns)
+        (intern (concat (cljbang--munge-ns cljbang--current-ns)
                         "--" (symbol-name name))))
     name))
 
-(defun clj2el--ns-resolve (sym)
+(defun cljbang--ns-resolve (sym)
   "Munged symbol for SYM when it names a var in the current ns, else nil."
-  (when-let* ((ns clj2el--current-ns)
-              (vars (gethash ns clj2el--ns-vars)))
+  (when-let* ((ns cljbang--current-ns)
+              (vars (gethash ns cljbang--ns-vars)))
     (when (gethash (symbol-name sym) vars)
-      (intern (concat (clj2el--munge-ns ns) "--" (symbol-name sym))))))
+      (intern (concat (cljbang--munge-ns ns) "--" (symbol-name sym))))))
 
-(defun clj2el-string-join (sep-or-coll &optional coll)
+(defun cljbang-string-join (sep-or-coll &optional coll)
   (let ((sep (if coll sep-or-coll ""))
         (xs (seq-into (or coll sep-or-coll) 'list)))
-    (mapconcat #'clj2el-str xs sep)))
+    (mapconcat #'cljbang-str xs sep)))
 
-(defun clj2el-string-split (s re)
+(defun cljbang-string-split (s re)
   (apply #'vector (split-string s re)))
 
-(defun clj2el-string-replace (s match rep)
+(defun cljbang-string-replace (s match rep)
   (replace-regexp-in-string (regexp-quote match) rep s))
 
-(defconst clj2el--ns-fns
-  '(("clojure.string/join" . clj2el-string-join)
-    ("clojure.string/split" . clj2el-string-split)
-    ("clojure.string/replace" . clj2el-string-replace)
+(defconst cljbang--ns-fns
+  '(("clojure.string/join" . cljbang-string-join)
+    ("clojure.string/split" . cljbang-string-split)
+    ("clojure.string/replace" . cljbang-string-replace)
     ("clojure.string/upper-case" . upcase)
     ("clojure.string/lower-case" . downcase)
     ("clojure.string/capitalize" . capitalize)
@@ -224,66 +241,66 @@ which are vector-like, out of the lookup branches."
 
 ;; el/ is the host environment, the way js/ is in ClojureScript: the name
 ;; after it is an elisp symbol taken verbatim.  It escapes ns munging
-;; (el/my/flymake-inline-ov keeps its slash) and the clj2el--core-fns
+;; (el/my/flymake-inline-ov keeps its slash) and the cljbang--core-fns
 ;; overrides, so elisp's own get, assoc, + ... stay reachable.
 
-(defun clj2el--el-symbol (sym)
+(defun cljbang--el-symbol (sym)
   "Elisp symbol named by an el/ qualified SYM, or nil."
   (let ((name (symbol-name sym)))
     (when (and (string-prefix-p "el/" name) (> (length name) 3))
       (intern (substring name 3)))))
 
-(defun clj2el--qualified (sym)
+(defun cljbang--qualified (sym)
   "Resolve ns-qualified SYM to an elisp function symbol, or nil."
   (let ((name (symbol-name sym)))
-    (or (clj2el--el-symbol sym)
+    (or (cljbang--el-symbol sym)
         (when (and (> (length name) 1)
                    (string-search "/" name)
                    (not (string-prefix-p "/" name))
                    (not (string-suffix-p "/" name)))
           (let ((parts (split-string name "/")))
             (unless (= (length parts) 2)
-              (error "clj2el: %s has more than one /; use el/%s for an elisp name"
+              (error "cljbang: %s has more than one /; use el/%s for an elisp name"
                      name name))
             (pcase-let* ((`(,ns ,n) parts)
-                         (full (or (cdr (assq (intern ns) clj2el--ns-alias-map))
-                                   (cdr (assq (intern ns) clj2el--ns-aliases))
+                         (full (or (cdr (assq (intern ns) cljbang--ns-alias-map))
+                                   (cdr (assq (intern ns) cljbang--ns-aliases))
                                    ns)))
-              (or (cdr (assoc (concat full "/" n) clj2el--ns-fns))
+              (or (cdr (assoc (concat full "/" n) cljbang--ns-fns))
                   (intern (concat (string-replace "." "-" full) "--" n)))))))))
 
 ;;; Compiler: Clojure form -> elisp form
 
-(defun clj2el--compile-body (forms env)
-  (mapcar (lambda (f) (clj2el-compile f env)) forms))
+(defun cljbang--compile-body (forms env)
+  (mapcar (lambda (f) (cljbang-compile f env)) forms))
 
 ;;; Destructuring
 ;;
 ;; let bindings and fn params take the same patterns, so both funnel
-;; through clj2el--destructure, which flattens one pattern into plain
+;; through cljbang--destructure, which flattens one pattern into plain
 ;; let* pairs.  A pattern binds its value to a gensym and then indexes
 ;; into it (sequential) or looks keys up in it (associative).  Patterns
 ;; nest, so the expansion recurses.
 
-(defun clj2el--nth (coll i)
+(defun cljbang--nth (coll i)
   "Element I of COLL, or nil when out of range, like Clojure's nth."
   (cond ((null coll) nil)
         ((listp coll) (nth i coll))
         ((< i (length coll)) (seq-elt coll i))))
 
-(defun clj2el--drop (coll i)
+(defun cljbang--drop (coll i)
   "Elements of COLL from index I on, as a list."
   (seq-drop (seq-into coll 'list) i))
 
-(defun clj2el--destructure (pattern val env)
+(defun cljbang--destructure (pattern val env)
   "Bindings that bind PATTERN to VAL, an elisp form, in `let*' order."
   (cond ((symbolp pattern) (list (list pattern val)))
-        ((vectorp pattern) (clj2el--destructure-seq pattern val env))
-        ((and (consp pattern) (eq (car pattern) 'clj2el--map-literal))
-         (clj2el--destructure-map (cdr pattern) val env))
-        (t (error "clj2el: unsupported destructuring pattern %S" pattern))))
+        ((vectorp pattern) (cljbang--destructure-seq pattern val env))
+        ((and (consp pattern) (eq (car pattern) 'cljbang--map-literal))
+         (cljbang--destructure-map (cdr pattern) val env))
+        (t (error "cljbang: unsupported destructuring pattern %S" pattern))))
 
-(defun clj2el--destructure-seq (vec val env)
+(defun cljbang--destructure-seq (vec val env)
   "Bindings for sequential pattern VEC, supporting & and :as."
   (let ((elts (append vec nil)) fixed rest-pat as)
     (while elts
@@ -292,21 +309,21 @@ which are vector-like, out of the lookup branches."
               ((eq p :as) (setq as (pop elts)))
               (t (push p fixed)))))
     (setq fixed (nreverse fixed))
-    (let* ((g (gensym "clj2el--seq"))
+    (let* ((g (gensym "cljbang--seq"))
            (bindings (list (list g val)))
            (i -1))
       (dolist (p fixed)
         (setq i (1+ i))
         (setq bindings
-              (nconc bindings (clj2el--destructure p `(clj2el--nth ,g ,i) env))))
+              (nconc bindings (cljbang--destructure p `(cljbang--nth ,g ,i) env))))
       (when rest-pat
         (setq bindings
-              (nconc bindings (clj2el--destructure
-                               rest-pat `(clj2el--drop ,g ,(length fixed)) env))))
+              (nconc bindings (cljbang--destructure
+                               rest-pat `(cljbang--drop ,g ,(length fixed)) env))))
       (when as (setq bindings (nconc bindings (list (list as g)))))
       bindings)))
 
-(defun clj2el--destructure-map (kvs val env)
+(defun cljbang--destructure-map (kvs val env)
   "Bindings for associative pattern KVS, supporting :keys, :or and :as.
 KVS is the flat key/value list of a map literal; in an explicit pair the
 key is the pattern and the value is the map key to look up."
@@ -317,14 +334,14 @@ key is the pattern and the value is the map key to look up."
                       ((eq k :or) (setq or-kvs (cdr v)))
                       (t (push (cons k v) pairs))))
     (setq pairs (nreverse pairs))
-    (let* ((g (gensym "clj2el--map"))
+    (let* ((g (gensym "cljbang--map"))
            (bindings (list (list g val)))
            (lookup (lambda (key pattern)
                      ;; an :or entry keyed by the bound symbol supplies
-                     ;; the default third argument to clj2el-get
+                     ;; the default third argument to cljbang-get
                      (let ((d (and (symbolp pattern) (plist-member or-kvs pattern))))
-                       `(clj2el-get ,g ,key
-                                    ,@(when d (list (clj2el-compile (cadr d) env))))))))
+                       `(cljbang-get ,g ,key
+                                    ,@(when d (list (cljbang-compile (cadr d) env))))))))
       (dolist (s keys)
         (setq bindings
               (nconc bindings
@@ -333,41 +350,41 @@ key is the pattern and the value is the map key to look up."
                                             s))))))
       (dolist (p pairs)
         (setq bindings
-              (nconc bindings (clj2el--destructure
+              (nconc bindings (cljbang--destructure
                                (car p) (funcall lookup (cdr p) (car p)) env))))
       (when as (setq bindings (nconc bindings (list (list as g)))))
       bindings)))
 
-(defun clj2el--compile-fn (params body env)
+(defun cljbang--compile-fn (params body env)
   (let ((arglist nil) (patterns nil) (env* env))
     ;; a destructuring param becomes a gensym in the arglist, unpacked by
     ;; a let* wrapped around the body
     (dolist (p (append params nil))
       (cond ((eq p '&) (push '&rest arglist))
             ((symbolp p) (push p arglist) (push p env*))
-            (t (let ((g (gensym "clj2el--arg")))
+            (t (let ((g (gensym "cljbang--arg")))
                  (push g arglist)
                  (push (cons p g) patterns)))))
     (setq arglist (nreverse arglist))
     (let (pairs)
       (dolist (pat (nreverse patterns))
-        (dolist (b (clj2el--destructure (car pat) (cdr pat) env*))
+        (dolist (b (cljbang--destructure (car pat) (cdr pat) env*))
           (push b pairs)
           (push (car b) env*)))
-      (let ((compiled (clj2el--compile-body body env*)))
+      (let ((compiled (cljbang--compile-body body env*)))
         `(lambda ,arglist
            ,@(if pairs `((let* ,(nreverse pairs) ,@compiled)) compiled))))))
 
-(defun clj2el--compile-let (bindings body env)
+(defun cljbang--compile-let (bindings body env)
   (let (pairs (env* env))
     (cl-loop for (pattern val) on (append bindings nil) by #'cddr
-             do (dolist (b (clj2el--destructure
-                            pattern (clj2el-compile val env*) env*))
+             do (dolist (b (cljbang--destructure
+                            pattern (cljbang-compile val env*) env*))
                   (push b pairs)
                   (push (car b) env*)))
-    `(let* ,(nreverse pairs) ,@(clj2el--compile-body body env*))))
+    `(let* ,(nreverse pairs) ,@(cljbang--compile-body body env*))))
 
-(defun clj2el--thread (init forms first?)
+(defun cljbang--thread (init forms first?)
   "Expand -> (FIRST? t) or ->> threading."
   (let ((acc init))
     (dolist (f forms acc)
@@ -375,38 +392,38 @@ key is the pattern and the value is the map key to look up."
                       (first? (cons (car f) (cons acc (cdr f))))
                       (t (append f (list acc))))))))
 
-(defun clj2el--resolve (sym)
+(defun cljbang--resolve (sym)
   "Lisp-1 view over elisp's split namespaces: var first, then function."
   (cond ((boundp sym) (symbol-value sym))
         ((fboundp sym) (symbol-function sym))
         (t (error "Unable to resolve symbol: %s" sym))))
 
-(defun clj2el--assign-target (sym env)
+(defun cljbang--assign-target (sym env)
   "Elisp symbol SYM assigns to.  Unlike value position, it stays unevaluated."
   (unless (symbolp sym)
-    (error "clj2el: set! needs a symbol, got %S" sym))
+    (error "cljbang: set! needs a symbol, got %S" sym))
   (cond ((memq sym env) sym)
-        ((clj2el--el-symbol sym))
-        ((clj2el--ns-resolve sym))
-        ((clj2el--qualified sym))
+        ((cljbang--el-symbol sym))
+        ((cljbang--ns-resolve sym))
+        ((cljbang--qualified sym))
         (t sym)))
 
-(defun clj2el--compile-symbol (form env)
+(defun cljbang--compile-symbol (form env)
   "Compile FORM in value position."
   (cond ((memq form env) form)
         ;; el/ names a var as readily as a function, so resolve it the
         ;; lisp-1 way rather than assuming #'
-        ((clj2el--el-symbol form)
-         `(clj2el--resolve ',(clj2el--el-symbol form)))
-        ((clj2el--qualified form)
-         `#',(clj2el--qualified form))
-        ((clj2el--ns-resolve form)
-         `(clj2el--resolve ',(clj2el--ns-resolve form)))
-        ((alist-get form clj2el--core-fns)
-         `#',(alist-get form clj2el--core-fns))
-        (t `(clj2el--resolve ',form))))
+        ((cljbang--el-symbol form)
+         `(cljbang--resolve ',(cljbang--el-symbol form)))
+        ((cljbang--qualified form)
+         `#',(cljbang--qualified form))
+        ((cljbang--ns-resolve form)
+         `(cljbang--resolve ',(cljbang--ns-resolve form)))
+        ((alist-get form cljbang--core-fns)
+         `#',(alist-get form cljbang--core-fns))
+        (t `(cljbang--resolve ',form))))
 
-(defun clj2el-compile (form &optional env)
+(defun cljbang-compile (form &optional env)
   "Compile Clojure FORM (elisp data) to an elisp form.  ENV = local symbols."
   (cond
    ((null form) nil)
@@ -414,21 +431,21 @@ key is the pattern and the value is the map key to look up."
    ((eq form 'true) t)
    ((eq form 'false) nil)
    ((keywordp form) form)
-   ((symbolp form) (clj2el--compile-symbol form env))
+   ((symbolp form) (cljbang--compile-symbol form env))
    ((vectorp form)
-    `(vector ,@(mapcar (lambda (f) (clj2el-compile f env)) (append form nil))))
+    `(vector ,@(mapcar (lambda (f) (cljbang-compile f env)) (append form nil))))
    ((not (consp form)) form)
    (t
     (pcase (car form)
-      ('clj2el--map-literal
-       `(clj2el-hash-map ,@(clj2el--compile-body (cdr form) env)))
-      ('clj2el--set-literal
-       `(clj2el-hash-set ,@(clj2el--compile-body (cdr form) env)))
+      ('cljbang--map-literal
+       `(cljbang-hash-map ,@(cljbang--compile-body (cdr form) env)))
+      ('cljbang--set-literal
+       `(cljbang-hash-set ,@(cljbang--compile-body (cdr form) env)))
       ('quote form)
       ('comment nil)
       ('ns
        (let ((name (symbol-name (cadr form))))
-         (setq clj2el--current-ns name)
+         (setq cljbang--current-ns name)
          ;; register (:require [lib :as alias]) clauses
          (dolist (clause (cddr form))
            (when (and (consp clause) (eq (car clause) :require))
@@ -439,80 +456,80 @@ key is the pattern and the value is the map key to look up."
                       (as (or (cadr (memq :as spec))
                               (cadr (memq :as-alias spec)))))
                  (when as
-                   (setf (alist-get as clj2el--ns-alias-map)
+                   (setf (alist-get as cljbang--ns-alias-map)
                          (symbol-name (car spec))))))))
-         `(setq clj2el--current-ns ,name)))
+         `(setq cljbang--current-ns ,name)))
       ('def
        (pcase-let* ((`(,name ,val) (cdr form))
-                    (name* (clj2el--ns-intern name)))
+                    (name* (cljbang--ns-intern name)))
          `(progn (defvar ,name* nil)
-                 (setq ,name* ,(clj2el-compile val env))
+                 (setq ,name* ,(cljbang-compile val env))
                  ',name*)))
       ('defn
        (pcase-let* ((`(,name ,params . ,body) (cdr form))
-                    (name* (clj2el--ns-intern name)))
-         `(progn (defalias ',name* ,(clj2el--compile-fn params body env))
+                    (name* (cljbang--ns-intern name)))
+         `(progn (defalias ',name* ,(cljbang--compile-fn params body env))
                  ',name*)))
       ('fn
        (let ((rest (cdr form)))
          (when (symbolp (car rest)) (pop rest)) ; drop optional fn name
-         (clj2el--compile-fn (car rest) (cdr rest) env)))
+         (cljbang--compile-fn (car rest) (cdr rest) env)))
       ('set!
-       `(setq ,(clj2el--assign-target (cadr form) env)
-              ,(clj2el-compile (caddr form) env)))
-      ('let (clj2el--compile-let (cadr form) (cddr form) env))
-      ('if `(if ,@(clj2el--compile-body (cdr form) env)))
-      ('when `(when ,@(clj2el--compile-body (cdr form) env)))
+       `(setq ,(cljbang--assign-target (cadr form) env)
+              ,(cljbang-compile (caddr form) env)))
+      ('let (cljbang--compile-let (cadr form) (cddr form) env))
+      ('if `(if ,@(cljbang--compile-body (cdr form) env)))
+      ('when `(when ,@(cljbang--compile-body (cdr form) env)))
       ('cond
        ;; :else needs no special case: a keyword is truthy in elisp too
        (let ((clauses (cdr form)))
          (when (cl-oddp (length clauses))
-           (error "clj2el: cond needs an even number of forms"))
+           (error "cljbang: cond needs an even number of forms"))
          `(cond ,@(cl-loop for (test expr) on clauses by #'cddr
-                           collect (list (clj2el-compile test env)
-                                         (clj2el-compile expr env))))))
-      ('do `(progn ,@(clj2el--compile-body (cdr form) env)))
-      ('-> (clj2el-compile (clj2el--thread (cadr form) (cddr form) t) env))
-      ('->> (clj2el-compile (clj2el--thread (cadr form) (cddr form) nil) env))
+                           collect (list (cljbang-compile test env)
+                                         (cljbang-compile expr env))))))
+      ('do `(progn ,@(cljbang--compile-body (cdr form) env)))
+      ('-> (cljbang-compile (cljbang--thread (cadr form) (cddr form) t) env))
+      ('->> (cljbang-compile (cljbang--thread (cadr form) (cddr form) nil) env))
       ('with-out-str
        `(with-temp-buffer
           (let ((standard-output (current-buffer)))
-            ,@(clj2el--compile-body (cdr form) env))
+            ,@(cljbang--compile-body (cdr form) env))
           (buffer-string)))
       ('time
-       (let ((start (gensym "clj2el-time-"))
-             (val (gensym "clj2el-val-")))
+       (let ((start (gensym "cljbang-time-"))
+             (val (gensym "cljbang-val-")))
          `(let* ((,start (current-time))
-                 (,val ,(clj2el-compile (cadr form) env)))
-            (clj2el-println
+                 (,val ,(cljbang-compile (cadr form) env)))
+            (cljbang-println
              (format "Elapsed time: %.6f msecs"
                      (* 1000 (float-time (time-subtract (current-time) ,start)))))
             ,val)))
       (_ ;; function call
        (let ((head (car form))
-             (args (clj2el--compile-body (cdr form) env)))
+             (args (cljbang--compile-body (cdr form) env)))
          (cond
           ;; a keyword looks itself up, and is a symbol, so test it first
-          ((keywordp head) `(clj2el-get ,(car args) ,head ,@(cdr args)))
-          ((and (symbolp head) (clj2el--qualified head))
-           `(,(clj2el--qualified head) ,@args))
-          ((and (symbolp head) (clj2el--ns-resolve head))
-           `(,(clj2el--ns-resolve head) ,@args))
-          ((and (symbolp head) (alist-get head clj2el--core-fns))
-           `(,(alist-get head clj2el--core-fns) ,@args))
+          ((keywordp head) `(cljbang-get ,(car args) ,head ,@(cdr args)))
+          ((and (symbolp head) (cljbang--qualified head))
+           `(,(cljbang--qualified head) ,@args))
+          ((and (symbolp head) (cljbang--ns-resolve head))
+           `(,(cljbang--ns-resolve head) ,@args))
+          ((and (symbolp head) (alist-get head cljbang--core-fns))
+           `(,(alist-get head cljbang--core-fns) ,@args))
           ((and (symbolp head) (memq head env))
-           `(clj2el--invoke ,head ,@args))
+           `(cljbang--invoke ,head ,@args))
           ((symbolp head) `(,head ,@args))
-          (t `(clj2el--invoke ,(clj2el-compile head env) ,@args)))))))))
+          (t `(cljbang--invoke ,(cljbang-compile head env) ,@args)))))))))
 
 ;;; Entry point
 
-(defun clj2el-eval-string (s)
+(defun cljbang-eval-string (s)
   "Read Clojure source S, compile each top-level form, eval in-process."
   (let (result)
-    (dolist (f (clj2el--splice-braces (clj2el--read-all (clj2el--rewrite-sets s)))
+    (dolist (f (cljbang--splice-braces (cljbang--read-all (cljbang--rewrite-sets s)))
                result)
-      (setq result (eval (clj2el-compile f) t)))))
+      (setq result (eval (cljbang-compile f) t)))))
 
 ;;; Embedded Clojure: elisp's reader already accepts most Clojure
 ;;; surface syntax (vectors, keywords, quote), so Clojure forms can sit
@@ -522,13 +539,13 @@ key is the pattern and the value is the map key to look up."
 ;;; {...} needs no reader of its own.  Braces are symbol constituents to
 ;;; the elisp reader, so {:a 1} comes back as the symbols `{:a' and `1}'
 ;;; -- the delimiters survive, glued to their neighbours.  Splitting them
-;;; back off and reducing the result gives (clj2el--map-literal k v ...),
+;;; back off and reducing the result gives (cljbang--map-literal k v ...),
 ;;; which the compiler tells apart from a call form.
 
-(defconst clj2el--set-marker 'clj2el--set
+(defconst cljbang--set-marker 'cljbang--set
   "Symbol #{ is rewritten to, so the elisp reader accepts a set literal.")
 
-(defun clj2el--rewrite-sets (s)
+(defun cljbang--rewrite-sets (s)
   "Rewrite #{ in S to a marker symbol the elisp reader accepts.
 Occurrences inside a string are left alone.  Needs the source text, so
 it applies to files and inline evaluation but not to `clj!'."
@@ -550,10 +567,10 @@ it applies to files and inline evaluation but not to `clj!'."
       (dolist (pos positions)
         (goto-char pos)
         (delete-char 1)
-        (insert (symbol-name clj2el--set-marker))))
+        (insert (symbol-name cljbang--set-marker))))
     (buffer-string)))
 
-(defun clj2el--lex-braces (name)
+(defun cljbang--lex-braces (name)
   "Split symbol NAME into tokens, exposing { and } as separate symbols."
   (let (tokens (start 0) (len (length name)))
     (dotimes (i len)
@@ -566,52 +583,52 @@ it applies to files and inline evaluation but not to `clj!'."
       (push (car (read-from-string (substring name start))) tokens))
     (nreverse tokens)))
 
-(defun clj2el--brace-tokens (form)
+(defun cljbang--brace-tokens (form)
   "Expand FORM into the token(s) it contributes to a brace scan."
   (cond
    ;; a comma is whitespace in Clojure, but the elisp reader took it as
    ;; unquote: (\, x) puts x back in the stream
    ((and (consp form) (eq (car form) '\,) (= (length form) 2))
-    (clj2el--brace-tokens (cadr form)))
+    (cljbang--brace-tokens (cadr form)))
    ((and form (symbolp form) (string-match-p "[{}]" (symbol-name form)))
-    (clj2el--lex-braces (symbol-name form)))
+    (cljbang--lex-braces (symbol-name form)))
    (t (list form))))
 
-(defun clj2el--splice-form (form)
-  (cond ((vectorp form) (apply #'vector (clj2el--splice-braces (append form nil))))
+(defun cljbang--splice-form (form)
+  (cond ((vectorp form) (apply #'vector (cljbang--splice-braces (append form nil))))
         ;; a dotted pair is quoted elisp data, such as an alist.  Braces
         ;; cannot span the dot, so recurse on both sides
         ((and (consp form) (not (proper-list-p form)))
-         (cons (clj2el--splice-form (car form)) (clj2el--splice-form (cdr form))))
-        ((consp form) (clj2el--splice-braces form))
+         (cons (cljbang--splice-form (car form)) (cljbang--splice-form (cdr form))))
+        ((consp form) (cljbang--splice-braces form))
         (t form)))
 
-(defun clj2el--splice-braces (forms)
+(defun cljbang--splice-braces (forms)
   "Reduce { } tokens in FORMS into map and set literal forms."
   (let ((stack (list nil)) kinds)
-    (dolist (tok (mapcan #'clj2el--brace-tokens forms))
+    (dolist (tok (mapcan #'cljbang--brace-tokens forms))
       (cond
        ((eq tok '\{)
         ;; #{ arrives here as the marker symbol followed by {
-        (let ((set? (eq (car (car stack)) clj2el--set-marker)))
+        (let ((set? (eq (car (car stack)) cljbang--set-marker)))
           (when set? (setcar stack (cdr (car stack))))
-          (push (if set? 'clj2el--set-literal 'clj2el--map-literal) kinds)
+          (push (if set? 'cljbang--set-literal 'cljbang--map-literal) kinds)
           (push nil stack)))
        ((eq tok '\})
-        (unless (cdr stack) (error "clj2el: unbalanced } in Clojure form"))
+        (unless (cdr stack) (error "cljbang: unbalanced } in Clojure form"))
         (let ((m (cons (pop kinds) (nreverse (pop stack)))))
           (push m (car stack))))
-       (t (push (clj2el--splice-form tok) (car stack)))))
-    (when (cdr stack) (error "clj2el: unbalanced { in Clojure form"))
+       (t (push (cljbang--splice-form tok) (car stack)))))
+    (when (cdr stack) (error "cljbang: unbalanced { in Clojure form"))
     (nreverse (car stack))))
 
 (defmacro clj! (&rest forms)
   "Compile Clojure FORMS to elisp at macro-expansion time."
-  `(progn ,@(mapcar #'clj2el-compile (clj2el--splice-braces forms))))
+  `(progn ,@(mapcar #'cljbang-compile (cljbang--splice-braces forms))))
 
 ;;; Loading whole files: implicit clj! around the file's contents
 
-(defun clj2el--read-all (src)
+(defun cljbang--read-all (src)
   "Read all forms from SRC with the elisp reader."
   (let ((pos 0) forms)
     (while (progn (setq pos (or (string-match "[^ \t\n]" src pos) (length src)))
@@ -623,7 +640,7 @@ it applies to files and inline evaluation but not to `clj!'."
         (end-of-file (setq pos (length src))))) ; trailing comment
     (nreverse forms)))
 
-(defun clj2el-load-file (file)
+(defun cljbang-load-file (file)
   "Load FILE of Clojure source, as if its contents were wrapped in `clj!'.
 Returns the value of the last form."
   (interactive "fLoad Clojure file: ")
@@ -632,31 +649,31 @@ Returns the value of the last form."
                (buffer-string)))
         ;; an (ns ...) in the file takes effect during the load only,
         ;; like Clojure's load-file preserving the caller's *ns*
-        (clj2el--current-ns clj2el--current-ns))
-    (clj2el-eval-string src)))
+        (cljbang--current-ns cljbang--current-ns))
+    (cljbang-eval-string src)))
 
 ;;; Editor integration: eval-last-sexp that respects clj! context
 
-(defvar-local clj2el-whole-buffer nil
+(defvar-local cljbang-whole-buffer nil
   "Non-nil means the whole buffer is Clojure source for evaluation.
 Declare it file-locally in a .clj file's first line:
-  ;; -*- mode: clojure; clj2el-whole-buffer: t -*-
-`clj2el-mode' is then enabled automatically.")
-(put 'clj2el-whole-buffer 'safe-local-variable #'booleanp)
+  ;; -*- mode: clojure; cljbang-whole-buffer: t -*-
+`cljbang-mode' is then enabled automatically.")
+(put 'cljbang-whole-buffer 'safe-local-variable #'booleanp)
 
-(defun clj2el--maybe-enable ()
-  (when clj2el-whole-buffer (clj2el-mode 1)))
-(add-hook 'hack-local-variables-hook #'clj2el--maybe-enable)
+(defun cljbang--maybe-enable ()
+  (when cljbang-whole-buffer (cljbang-mode 1)))
+(add-hook 'hack-local-variables-hook #'cljbang--maybe-enable)
 
-(defun clj2el--clj-context-p ()
-  "Non-nil when point is in Clojure context: a whole-buffer clj2el
+(defun cljbang--clj-context-p ()
+  "Non-nil when point is in Clojure context: a whole-buffer cljbang
 file, a clojure-mode buffer, or inside a (clj! ...) form."
-  (or clj2el-whole-buffer
+  (or cljbang-whole-buffer
       (derived-mode-p 'clojure-mode)
       (derived-mode-p 'clojure-ts-mode)
-      (clj2el--inside-clj!)))
+      (cljbang--inside-clj!)))
 
-(defun clj2el--inside-clj! ()
+(defun cljbang--inside-clj! ()
   "Non-nil when point is inside a (clj! ...) form."
   (cl-some (lambda (pos)
              (save-excursion
@@ -664,45 +681,45 @@ file, a clojure-mode buffer, or inside a (clj! ...) form."
                (looking-at-p "(\\s-*clj!\\_>")))
            (nth 9 (syntax-ppss))))
 
-(defface clj2el-result-face
+(defface cljbang-result-face
   '((t :inherit shadow :slant italic))
   "Face for inline evaluation result overlays.")
 
-(defvar-local clj2el--result-overlays nil)
+(defvar-local cljbang--result-overlays nil)
 
-(defun clj2el--remove-result-overlays ()
-  (mapc #'delete-overlay clj2el--result-overlays)
-  (setq clj2el--result-overlays nil)
-  (remove-hook 'pre-command-hook #'clj2el--remove-result-overlays 'local))
+(defun cljbang--remove-result-overlays ()
+  (mapc #'delete-overlay cljbang--result-overlays)
+  (setq cljbang--result-overlays nil)
+  (remove-hook 'pre-command-hook #'cljbang--remove-result-overlays 'local))
 
-(defun clj2el--show-result (str pos)
+(defun cljbang--show-result (str pos)
   "Show STR in an overlay after POS until the next command."
-  (clj2el--remove-result-overlays)
+  (cljbang--remove-result-overlays)
   (let ((ov (make-overlay pos pos)))
     (overlay-put ov 'after-string
-                 (propertize (concat " => " str) 'face 'clj2el-result-face))
-    (push ov clj2el--result-overlays)
-    (add-hook 'pre-command-hook #'clj2el--remove-result-overlays nil 'local)))
+                 (propertize (concat " => " str) 'face 'cljbang-result-face))
+    (push ov cljbang--result-overlays)
+    (add-hook 'pre-command-hook #'cljbang--remove-result-overlays nil 'local)))
 
-(defun clj2el-eval-last-sexp ()
+(defun cljbang-eval-last-sexp ()
   "Eval the sexp before point, honoring `clj!' context.
 Inside a `clj!' form the sexp text is read and evaluated as Clojure,
 including {...} map literals.  The result is shown in an overlay next
 to the form and in the echo area.
 Elsewhere falls back to `eval-last-sexp'."
   (interactive)
-  (if (clj2el--clj-context-p)
+  (if (cljbang--clj-context-p)
       (let* ((beg (save-excursion (backward-sexp) (point)))
              ;; heed the nearest preceding (ns ...) form in the buffer
-             (clj2el--current-ns (or (clj2el--buffer-ns) clj2el--current-ns))
-             (val (clj2el--pr-str
-                   (clj2el-eval-string
+             (cljbang--current-ns (or (cljbang--buffer-ns) cljbang--current-ns))
+             (val (cljbang--pr-str
+                   (cljbang-eval-string
                     (buffer-substring-no-properties beg (point))))))
-        (clj2el--show-result val (point))
+        (cljbang--show-result val (point))
         (message "=> %s" val))
     (call-interactively #'eval-last-sexp)))
 
-(defun clj2el--buffer-ns ()
+(defun cljbang--buffer-ns ()
   "Name of the nearest (ns ...) form before point, or nil."
   (save-excursion
     (when (re-search-backward "(ns[ \t\n]+\\([a-zA-Z0-9._-]+\\)" nil t)
@@ -710,31 +727,31 @@ Elsewhere falls back to `eval-last-sexp'."
 
 ;;; Completion: Clojure names + all of elisp, via completion-at-point
 
-(defconst clj2el--special-forms
+(defconst cljbang--special-forms
   '("def" "defn" "fn" "let" "set!" "if" "when" "cond" "do" "ns" "quote"
     "comment" "->" "->>" "time" "with-out-str")
-  "Names handled as special forms by `clj2el-compile'.")
+  "Names handled as special forms by `cljbang-compile'.")
 
-(defun clj2el--completion-candidates ()
+(defun cljbang--completion-candidates ()
   "Clojure-side completion candidates: special forms, core fns, ns/aliased vars."
-  (let ((cands (copy-sequence clj2el--special-forms)))
-    (dolist (c clj2el--core-fns)
+  (let ((cands (copy-sequence cljbang--special-forms)))
+    (dolist (c cljbang--core-fns)
       (push (symbol-name (car c)) cands))
-    (dolist (a (append clj2el--ns-alias-map clj2el--ns-aliases))
+    (dolist (a (append cljbang--ns-alias-map cljbang--ns-aliases))
       (let ((prefix (concat (cdr a) "/")))
-        (dolist (f clj2el--ns-fns)
+        (dolist (f cljbang--ns-fns)
           (when (string-prefix-p prefix (car f))
             (push (concat (symbol-name (car a)) "/"
                           (substring (car f) (length prefix)))
                   cands)))))
-    (when-let* ((ns (or (clj2el--buffer-ns) clj2el--current-ns))
-                (vars (gethash ns clj2el--ns-vars)))
+    (when-let* ((ns (or (cljbang--buffer-ns) cljbang--current-ns))
+                (vars (gethash ns cljbang--ns-vars)))
       (maphash (lambda (k _) (push k cands)) vars))
     cands))
 
-(defun clj2el-completion-at-point ()
-  "Complete Clojure and elisp symbols in clj2el context."
-  (when (clj2el--clj-context-p)
+(defun cljbang-completion-at-point ()
+  "Complete Clojure and elisp symbols in cljbang context."
+  (when (cljbang--clj-context-p)
     (let ((beg (save-excursion
                  (skip-chars-backward "^] \t\n(){}\",'`;~@^")
                  (point)))
@@ -742,7 +759,7 @@ Elsewhere falls back to `eval-last-sexp'."
       (when (< beg end)
         (list beg end
               (completion-table-merge
-               (clj2el--completion-candidates)
+               (cljbang--completion-candidates)
                (apply-partially
                 #'completion-table-with-predicate
                 obarray
@@ -750,20 +767,20 @@ Elsewhere falls back to `eval-last-sexp'."
                 t))
               :exclusive 'no)))))
 
-(define-minor-mode clj2el-mode
+(define-minor-mode cljbang-mode
   "Clojure-aware evaluation inside `clj!' forms.
 Remaps \\[eval-last-sexp] so evaluating inside a `clj!' form uses
 Clojure semantics, and elisp semantics elsewhere in the buffer.
 Adds Clojure- and elisp-symbol completion at point."
   :lighter " clj!"
   :keymap (let ((m (make-sparse-keymap)))
-            (define-key m [remap eval-last-sexp] #'clj2el-eval-last-sexp)
+            (define-key m [remap eval-last-sexp] #'cljbang-eval-last-sexp)
             m)
-  (if clj2el-mode
+  (if cljbang-mode
       (add-hook 'completion-at-point-functions
-                #'clj2el-completion-at-point nil t)
+                #'cljbang-completion-at-point nil t)
     (remove-hook 'completion-at-point-functions
-                 #'clj2el-completion-at-point t)))
+                 #'cljbang-completion-at-point t)))
 
-(provide 'clj2el-core)
-;;; clj2el-core.el ends here
+(provide 'cljbang)
+;;; cljbang.el ends here

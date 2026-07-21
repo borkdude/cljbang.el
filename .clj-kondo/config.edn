@@ -1,4 +1,4 @@
-;; el/ is clj2el's host environment, the way js/ is in ClojureScript:
+;; el/ is cljbang's host environment, the way js/ is in ClojureScript:
 ;; el/emacs-version means the elisp function emacs-version.  There is no
 ;; such Clojure namespace, so exempt it from the unresolved check.
 {:linters {:unresolved-namespace {:exclude [el]}}}

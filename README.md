@@ -1,44 +1,98 @@
-# clj2el
+# cljbang
 
-The clj2el tool transpiles Clojure to Emacs Lisp. It is currently incomplete,
-but contributions are welcome. It is targeted at folks who know Clojure better
-than Emacs Lisp.
+Clojure that runs as Emacs Lisp.
 
-See the interactive web page [here](https://borkdude.github.io/clj2el/).
+cljbang compiles Clojure forms to Emacs Lisp forms and evaluates them in the
+running Emacs. There is no subprocess, no transpiled text, and no runtime
+beyond `cljbang.el` itself.
 
-## CLI
+## Install
 
-There's also a tiny babashka CLI: `clj2el`. The CLI can be installed with
-[bbin]:
-
-    bbin install io.github.borkdude/clj2el --latest-sha
-
-And used like this:
-
-    $ cat source.clj
-    (defn foo [x & xs] xs)
-
-    (inc 2)
-
-    (map inc [1 2 3])
-    $ cat source.clj | clj2el
-    (defun foo (x &rest xs) xs)
-
-    (1+ 2)
-
-    (mapcar #'1+ (vector 1 2 3))
-
-[bbin]: https://github.com/babashka/bbin
-
-
-Note that you can replace a region with `clj2el` in emacs with `C-u M-|`.
-
-## Using `clj2el.el` from Doom Emacs
+Requires Emacs 28.1 or later.
 
 ```emacs-lisp
-;; packages.el
-(package! clj2el :recipe (:host github :repo "borkdude/clj2el" :files ("*.el")))
-
-;; config.el
-(use-package! clj2el)
+(use-package cljbang
+  :vc (:url "https://github.com/borkdude/cljbang"))
 ```
+
+## Use
+
+Clojure inside an elisp buffer, compiled at macro-expansion time:
+
+```emacs-lisp
+(clj! (defn winner [{:keys [alice bob]}]
+        (if (> alice bob) :alice :bob))
+
+      (winner {:alice 3 :bob 5}))
+;; => :bob
+```
+
+A whole file:
+
+```emacs-lisp
+(cljbang-load-file "config.clj")
+```
+
+Form by form, with the result in an overlay. Bind `cljbang-eval-last-sexp`
+in `cljbang-mode`, or put this on the first line of a `.clj` file:
+
+```clojure
+;; -*- mode: clojure; cljbang-whole-buffer: t -*-
+```
+
+## Interop
+
+Any name cljbang does not define compiles to a plain elisp call:
+
+```clojure
+(propertize "hi" 'face 'bold)
+(make-overlay (point) (line-end-position))
+```
+
+`el/` reaches the host environment explicitly, the way `js/` does in
+ClojureScript. Use it for names cljbang shadows, and for elisp names
+containing a slash:
+
+```clojure
+(el/assoc "b" '(("a" . 1) ("b" . 2)))   ; elisp assoc, not Clojure's
+el/tab-width                            ; a variable, not a function
+(set! el/my/some-var 42)                ; slash preserved
+```
+
+## Supported
+
+`def` `defn` `fn` `let` `set!` `if` `when` `cond` `do` `ns` `quote` `comment`
+`->` `->>` `time` `with-out-str`
+
+Map and set literals, destructuring (sequential and associative, nested,
+in `let` and in fn params), and sets, maps, keywords and vectors called as
+functions.
+
+```clojure
+(#{1 2 3} 1)                ;; => 1
+(:a {:a 1})                 ;; => 1
+(filter #{1 3} [1 2 3 4])   ;; => (1 3)
+```
+
+## Differences from Clojure
+
+Host semantics win where they conflict, as in squint.
+
+- `/` is elisp division: integers, no ratios
+- characters are integers, so `(nth "abc" 0)` is `97`
+- `assoc` copies the map, so it is O(n)
+- `#{...}` needs source text and so does not work inside `clj!`. Use
+  `hash-set` there
+- `#(...)` is a read error. Use `fn`
+- `:strs`, `:syms` and namespaced `:keys` are not implemented
+
+## Test
+
+```
+make test
+make compile
+```
+
+## License
+
+EPL-1.0

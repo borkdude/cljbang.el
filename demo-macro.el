@@ -6,7 +6,7 @@
 ;; Clojure too.
 
 (add-to-list 'load-path (file-name-directory (or load-file-name buffer-file-name)))
-(require 'clj2el-core)
+(require 'cljbang)
 
 (clj!
  (defn square [x] (* x x))
@@ -67,7 +67,7 @@
 
 (clj!
  (defn foo [x y] (str x y))
- ;; eval inside clj! works with clj2el minor mode
+ ;; eval inside clj! works with cljbang minor mode
  (foo "hello" "there")
  )
 

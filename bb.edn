@@ -1,2 +1,0 @@
-{:deps {io.github.borkdude/clj2el {:local/root "."}}
- :bbin/bin {clj2el {:main-opts ["-x" "clj2el.exec/exec"]}}}
