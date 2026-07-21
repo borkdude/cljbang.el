@@ -1,10 +1,15 @@
 # cljbang
 
-Clojure that runs as Emacs Lisp.
+A Clojure-like that runs as Emacs Lisp.
 
-cljbang compiles Clojure forms to Emacs Lisp forms and evaluates them in the
+Cljbang (`clj!`) compiles Clojure forms to Emacs Lisp forms and evaluates them in the
 running Emacs. There is no subprocess, no transpiled text, and no runtime
 beyond `cljbang.el` itself.
+
+This project is heavily influenced by how I wrote [squint](https://squint-cljs.github.io/squint/) and adopts its philosophy:
+
+- Host and its data structures first: interop should be dead easy without transforming between islands
+- Performance first
 
 ## Install
 
@@ -94,6 +99,13 @@ functions.
 (filter #{1 3} [1 2 3 4])   ;; => (1 3)
 ```
 
+Anonymous function literals, with `%`, `%1`, `%2` and `%&`:
+
+```clojure
+(map #(+ % 1) [1 2 3])      ;; => (2 3 4)
+(#(list %1 %&) 1 2 3)       ;; => (1 (2 3))
+```
+
 ## Differences from Clojure
 
 Host semantics win where they conflict, as in squint.
@@ -101,9 +113,8 @@ Host semantics win where they conflict, as in squint.
 - `/` is elisp division: integers, no ratios
 - characters are integers, so `(nth "abc" 0)` is `97`
 - `assoc` copies the map, so it is O(n)
-- `#{...}` needs source text and so does not work inside `clj!`. Use
-  `hash-set` there
-- `#(...)` is a read error. Use `fn`
+- `#{...}` and `#(...)` need source text and so do not work inside `clj!`.
+  Use `hash-set` and `fn` there, or move your source to a `.clj` file.
 - `:strs`, `:syms` and namespaced `:keys` are not implemented
 
 ## Test

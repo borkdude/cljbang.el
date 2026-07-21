@@ -78,6 +78,30 @@
   (should (= 3 (cljbang-test--eval "(count (hash-set 1 2 3))"))))
 
 
+;;; #(...) anonymous functions
+
+(ert-deftest cljbang-test-fn-literal-percent ()
+  (should (equal '(2 3 4) (cljbang-test--eval "(map #(+ % 1) [1 2 3])")))
+  (should (equal '(2 4) (cljbang-test--eval "(map #(* %1 2) [1 2])"))))
+
+(ert-deftest cljbang-test-fn-literal-positional ()
+  (should (= 7 (cljbang-test--eval "(#(+ %1 %2) 3 4)"))))
+
+(ert-deftest cljbang-test-fn-literal-rest ()
+  (should (equal '(1 (2 3)) (cljbang-test--eval "(#(list %1 %&) 1 2 3)"))))
+
+(ert-deftest cljbang-test-fn-literal-no-args ()
+  (should (null (cljbang-test--eval "(#(list))"))))
+
+(ert-deftest cljbang-test-fn-literal-nests-other-forms ()
+  (should (equal '(3 4) (cljbang-test--eval "(map #(-> % inc inc) [1 2])")))
+  (should (equal '(1 2) (cljbang-test--eval "(map #(get % :a) [{:a 1} {:a 2}])")))
+  (should (equal '(2 1) (cljbang-test--eval "(map #(count #{% 9}) [1 9])"))))
+
+(ert-deftest cljbang-test-fn-literal-rewrite-skips-strings ()
+  (should (equal "#(not a fn)" (cljbang-test--eval "(#(str \"#(not a fn)\"))"))))
+
+
 ;;; Destructuring
 
 (ert-deftest cljbang-test-destructure-sequential ()
@@ -264,9 +288,10 @@
   (should (= 5 (eval (read "(clj! (let [{:keys [a]} {:a 5}] a))") t)))
   (should (= 3 (eval (read "(clj! (count (hash-set 1 2 3)))") t))))
 
-(ert-deftest cljbang-test-clj-macro-has-no-set-literals ()
-  "#{ needs source text, which the macro never sees.  Documented limitation."
-  (should-error (read "(clj! (count #{1 2}))")))
+(ert-deftest cljbang-test-clj-macro-has-no-dispatch-literals ()
+  "#{ and #( need source text, which the macro never sees."
+  (should-error (read "(clj! (count #{1 2}))"))
+  (should-error (read "(clj! (map #(+ % 1) [1]))")))
 
 
 ;;; Loading files

@@ -355,6 +355,49 @@ key is the pattern and the value is the map key to look up."
       (when as (setq bindings (nconc bindings (list (list as g)))))
       bindings)))
 
+;;; #(...) anonymous functions
+;;
+;; The arity comes from the % symbols in the body: % is %1, %2 and up are
+;; positional, %& is the rest argument.
+
+(defun cljbang--fn-literal-subst (form)
+  "Replace % with %1 in FORM, which Clojure treats as the same argument."
+  (cond ((eq form '%) '%1)
+        ((vectorp form)
+         (apply #'vector (mapcar #'cljbang--fn-literal-subst (append form nil))))
+        ((and (consp form) (not (proper-list-p form)))
+         (cons (cljbang--fn-literal-subst (car form))
+               (cljbang--fn-literal-subst (cdr form))))
+        ((consp form) (mapcar #'cljbang--fn-literal-subst form))
+        (t form)))
+
+(defun cljbang--fn-literal-scan (form acc)
+  "Record % arguments used in FORM into ACC, a cons of (max . rest-p)."
+  (cond
+   ((and form (symbolp form))
+    (let ((name (symbol-name form)))
+      (cond ((equal name "%&") (setcdr acc t))
+            ((string-match "\\`%\\([0-9]+\\)\\'" name)
+             (setcar acc (max (car acc)
+                              (string-to-number (match-string 1 name))))))))
+   ((vectorp form)
+    (mapc (lambda (x) (cljbang--fn-literal-scan x acc)) (append form nil)))
+   ((and (consp form) (not (proper-list-p form)))
+    (cljbang--fn-literal-scan (car form) acc)
+    (cljbang--fn-literal-scan (cdr form) acc))
+   ((consp form)
+    (mapc (lambda (x) (cljbang--fn-literal-scan x acc)) form)))
+  acc)
+
+(defun cljbang--compile-fn-literal (body env)
+  "Compile the BODY of a #(...) form to a lambda."
+  (let* ((body (cljbang--fn-literal-subst body))
+         (acc (cljbang--fn-literal-scan body (cons 0 nil)))
+         (params (append (cl-loop for i from 1 to (car acc)
+                                  collect (intern (format "%%%d" i)))
+                         (when (cdr acc) '(& %&)))))
+    (cljbang--compile-fn (vconcat params) (list body) env)))
+
 (defun cljbang--compile-fn (params body env)
   (let ((arglist nil) (patterns nil) (env* env))
     ;; a destructuring param becomes a gensym in the arglist, unpacked by
@@ -441,6 +484,7 @@ key is the pattern and the value is the map key to look up."
        `(cljbang-hash-map ,@(cljbang--compile-body (cdr form) env)))
       ('cljbang--set-literal
        `(cljbang-hash-set ,@(cljbang--compile-body (cdr form) env)))
+      ('cljbang--fn-literal (cljbang--compile-fn-literal (cdr form) env))
       ('quote form)
       ('comment nil)
       ('ns
@@ -527,7 +571,7 @@ key is the pattern and the value is the map key to look up."
 (defun cljbang-eval-string (s)
   "Read Clojure source S, compile each top-level form, eval in-process."
   (let (result)
-    (dolist (f (cljbang--splice-braces (cljbang--read-all (cljbang--rewrite-sets s)))
+    (dolist (f (cljbang--splice-braces (cljbang--read-all (cljbang--rewrite-dispatch s)))
                result)
       (setq result (eval (cljbang-compile f) t)))))
 
@@ -545,8 +589,14 @@ key is the pattern and the value is the map key to look up."
 (defconst cljbang--set-marker 'cljbang--set
   "Symbol #{ is rewritten to, so the elisp reader accepts a set literal.")
 
-(defun cljbang--rewrite-sets (s)
-  "Rewrite #{ in S to a marker symbol the elisp reader accepts.
+(defconst cljbang--dispatch-rewrites
+  '(("#{" . "cljbang--set{")
+    ;; ( is a real delimiter, so #( becomes a well formed list outright
+    ("#(" . "(cljbang--fn-literal "))
+  "Reader dispatch forms, and the text the elisp reader accepts instead.")
+
+(defun cljbang--rewrite-dispatch (s)
+  "Rewrite #{ and #( in S to forms the elisp reader accepts.
 Occurrences inside a string are left alone.  Needs the source text, so
 it applies to files and inline evaluation but not to `clj!'."
   (with-temp-buffer
@@ -555,19 +605,21 @@ it applies to files and inline evaluation but not to `clj!'."
       (modify-syntax-entry ?\" "\"" table)
       (modify-syntax-entry ?\\ "\\" table)
       (set-syntax-table table))
-    (goto-char (point-min))
-    (let (positions)
-      (while (search-forward "#{" nil t)
-        ;; syntax-ppss moves point, so keep the search position
-        (let ((beg (match-beginning 0)))
-          (unless (save-excursion (nth 3 (syntax-ppss beg)))
-            (push beg positions))
-          (goto-char (+ beg 2))))
-      ;; last match first, so the earlier positions stay valid
-      (dolist (pos positions)
+    (let (edits)
+      (pcase-dolist (`(,find . ,replace) cljbang--dispatch-rewrites)
+        (goto-char (point-min))
+        (while (search-forward find nil t)
+          ;; syntax-ppss moves point, so keep the search position
+          (let ((beg (match-beginning 0)))
+            (unless (save-excursion (nth 3 (syntax-ppss beg)))
+              (push (list beg (length find) replace) edits))
+            (goto-char (+ beg (length find))))))
+      ;; latest position first, so the earlier ones stay valid
+      (pcase-dolist (`(,pos ,len ,replace)
+                     (sort edits (lambda (a b) (> (car a) (car b)))))
         (goto-char pos)
-        (delete-char 1)
-        (insert (symbol-name cljbang--set-marker))))
+        (delete-char len)
+        (insert replace)))
     (buffer-string)))
 
 (defun cljbang--lex-braces (name)
