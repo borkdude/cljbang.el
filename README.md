@@ -15,9 +15,7 @@ This project is heavily influenced by how I wrote [Squint](https://squint-cljs.g
 - Light-weight: compilation happens at macro-expansion, so a byte-compiled file costs nothing at load. Uncompiled, about 70ms per 1000 defns.
 - Performance first: compiled output should run fast, in the same ballpark as elisp
 
-An example.
-
-Wwhich buffers are visiting a file that is no longer there?
+Which buffers are visiting a file that is no longer there?
 
 ```clojure
 (defn stale-buffers []
@@ -38,8 +36,8 @@ The same thing in Emacs Lisp, which is what it compiles to:
           (push (buffer-name b) result))))))
 ```
 
-This is running in the same process, without any subproceses, just a light-weight transform to Elisp and using some of the cljbang's standard library functions
-The functions `buffer-list`, `buffer-file-name` and `file-exists-p` are the Emacs functions you already know, reached through `el/`.
+`buffer-list`, `buffer-file-name` and `file-exists-p` are the Emacs
+functions you already know, reached through `el/`.
 
 ## Installation
 
@@ -76,13 +74,10 @@ or:
 (cljbang-require 'example)
 ```
 
-The compiled result is cached beside the file as `example.clj.30-0.0.1.elc` and
+The result is cached beside the file as `example.clj.30-0.0.1.elc` and
 reused until you edit the source, so this costs about what loading the
-equivalent elisp would. The name carries the Emacs version and the cljbang
-version, so upgrading either one rebuilds rather than loading output the current
-compiler would not produce. The `.elc` files this produces, you can ignore in
-version control.
-
+equivalent elisp would. The name carries the Emacs and cljbang versions,
+so upgrading either rebuilds. Ignore `*.clj.*.elc` in version control.
 
 Then in your `example.clj` just put this line to enable `C-x C-e` to get inline evaluation working:
 
@@ -92,24 +87,10 @@ Then in your `example.clj` just put this line to enable `C-x C-e` to get inline 
 
 ### Interning
 
-In Cljbang, `defn` and `def` intern real elisp symbols, so anything the file defines is
-callable from elisp afterwards. Without an `ns` form the name is used as is:
-
-```clojure
-;; example.clj
-(defn greet [x] (str "hi " x))
-(def answer 42)
-```
-
-```emacs-lisp
-(cljbang-load-file "example.clj")
-(greet "you")   ;; => "hi you"
-answer          ;; => 42
-```
-
-An `ns` form prefixes them instead, following the elisp convention: one
-dash for the public API, two for what is internal to a package. `defn-`
-gives you the second.
+`defn` and `def` intern real elisp symbols, so anything a file defines is
+callable from elisp afterwards. Without an `ns` the name is used as is.
+An `ns` prefixes it, following the elisp convention: one dash for the
+public API, two for internal, which is what `defn-` gives you.
 
 ```clojure
 ;; my_config.clj
@@ -123,22 +104,28 @@ gives you the second.
 (cljbang-load-file "my_config.clj")
 (my-config-greet "you")   ;; => "hello you"
 my-config-answer          ;; => 7
-(my-config--shout "hey")  ;; => "HEY"   internal, two dashes
+(my-config--shout "hey")  ;; => "HEY"
 ```
 
-Dots in the namespace become dashes, so `(ns my.deep.ns)` gives
-`my-deep-ns-name`.
-
-From cljbang code, reach them with the namespace:
-
-```clojure
-(my.config/greet "you")   ;; => "hello you"
-```
+Dots become dashes, so `(ns my.deep.ns)` gives `my-deep-ns-name`. From
+cljbang, reach them with the namespace: `(my.config/greet "you")`.
 
 The `ns` is in effect only while the file loads, so it does not leak into
 whatever you evaluate next.
 
-A file with no `ns` form can require at the top level, and elisp can too:
+### Require
+
+A `:require` loads a `.clj` file if it finds one, relative to the
+requiring file and then along `cljbang-load-path`, and otherwise loads an
+elisp feature of that name. Namespaces map to file names as in Clojure,
+so `lib.some-thing` is `lib/some_thing.clj`.
+
+```clojure
+(ns app.a (:require [lib.b :as b]))
+(defn run [] (b/hello "a"))
+```
+
+A file with no `ns` can require at the top level, and so can elisp:
 
 ```clojure
 (require '[lib.b :as b])
@@ -148,59 +135,33 @@ A file with no `ns` form can require at the top level, and elisp can too:
 (cljbang-require 'lib.b)
 ```
 
-### Require
+A require happens once, so cycles terminate. `:as-alias` names a
+namespace without loading it, as in Clojure. Aliasing a prefix that names
+no feature is allowed when something is defined under it, which covers
+Emacs built-ins like `string-`.
 
-A `:require` loads either a cljbang `.clj` file or an elisp library, in that order.
-Cljbang looks for a `.clj` file first, relative to the requiring file and then along `cljbang-load-path`, and
-falls back to loading an elisp feature of that name.
-
-```clojure
-;; lib/b.clj
-(ns lib.b)
-(defn hello [x] (str "hello from b: " x))
-```
+Qualified names reach elisp the same way, which is what makes this the
+natural way to call a package. Internal names are not reachable so use
+`el/` for those:
 
 ```clojure
-;; app_a.clj
-(ns app.a (:require [lib.b :as b]))
-(defn run [] (b/hello "a"))     ;; => "hello from b: a"
+(magit/status)                  ;; calls magit-status
+(el/magit--display-buffer buf)  ;; the internal one
 ```
 
-Namespaces map to file names as in Clojure, so `lib.some-thing` is
-`lib/some_thing.clj`.
+### Calling a package
 
-Requiring an Emacs package loads it, and the alias saves you the prefix:
+`(magit/status)` works with no require, because `magit-status` is an
+autoload and calling it pulls magit in. Requiring the package up front
+would give that up.
 
-```clojure
-(ns my.config (:require [magit :as m]))
-(m/status)                       ;; calls magit-status
-```
+clj-kondo does not know that. Either require the package, which is the
+only thing that satisfies it on its own but loads magit when the file
+loads, or stay bare and add the packages you call to the same exclude
+list as `el`, below.
 
-A require happens once, so cycles terminate. Use `:as-alias` to name a
-namespace without loading it, as in Clojure.
-
-Many Emacs built-ins have a prefix that names no feature, so aliasing one
-is allowed as long as something is defined under it. Here we load the built-in package `string`:
-
-```clojure
-(ns my.config (:require [string :as s]))
-(s/trim "  hi  ")        ;; calls string-trim, nothing to load
-```
-
-The same munging works in reverse, which is what makes ns-qualified syntax
-the natural way to call an Emacs package:
-
-```clojure
-(magit/status)            ;; calls magit-status
-(projectile/find-file)    ;; calls projectile-find-file
-```
-
-Internal names are not reachable this way on purpose. Use `el/` when you
-really want one:
-
-```clojure
-(el/magit--display-buffer buf)
-```
+Going bare means a typo like `(magti/status)` fails when it is called
+rather than at load.
 
 ## Interop
 
@@ -242,7 +203,7 @@ as macros. Cljbang knows them all, for now.
 
 ### Macros
 
-Since cljbang does not yet support syntax-quite you can build simple macros
+Cljbang has no syntax quote yet, so build macros
 using `list` and `cons`:
 
 ```clojure
@@ -255,11 +216,12 @@ using `list` and `cons`:
 ```
 
 A macro is registered while compiling, so a form further down the same
-file can use it. Expansion happens before the arguments are compiled,
-which is the point of one. A `let` binding of the same name shadows it.
+file can use it. A `let` binding of the same name shadows it.
 
 
 ### Functions
+
+Supported functions:
 
 ```
 + - * / mod = not= < > <= >= inc dec not odd? even? zero?
@@ -333,39 +295,24 @@ Host semantics win where they conflict, unless otherwise noted, like in Squint.
 
 ## Benchmarks
 
-Casual, one machine, Emacs 30.2, a namespace of 1000 `defn`s. Reproduce
-with `bb bench-load` and `bb bench`.
+Emacs 30.2, one machine, 1000 `defn`s. Reproduce with `bb bench-load`
+and `bb bench`.
 
-Loading:
-
-| | |
+| loading | |
 |---|---|
 | `cljbang-load-file`, cold cache | 157 ms |
 | `cljbang-load-file`, warm cache | 1.9 ms |
-| byte-compiled `.el` using `clj!` | 2.0 ms |
 | byte-compiled plain elisp | 1.0 ms |
 
-Compilation happens at macro-expansion, so a byte-compiled file has no
-cljbang left in it and loads at roughly the speed of the elisp it became.
-`cljbang-load-file` gives a `.clj` file the same treatment, so neither
-form of source is slower than the other once warm. Building the cache
-costs about 160ms, paid once per edit rather than once per startup.
-
-Running, calling all 1000 functions once:
-
-| | |
+| calling all 1000 | |
 |---|---|
 | cljbang | 0.40 ms |
 | plain elisp | 0.36 ms |
 
-Compiled output is plain elisp, so this is close to parity. Collection
-code is further off, since `map` and `filter` dispatch through a wrapper
-so a set or keyword can be used as a function, and `assoc` copies.
-
-In practice cljbang incurs little overhead. A byte-compiled file costs
-about a millisecond more to load than the elisp it became, and runs
-within about ten percent of it. For configuration code that is not
-something you will notice.
+Compiled output is plain elisp, so once the cache is warm the overhead is
+about a millisecond at load and ten percent at run time. Collection code
+is further off, since `map` and `filter` dispatch through a wrapper and
+`assoc` copies.
 
 ## Test
 
