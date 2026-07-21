@@ -262,7 +262,7 @@ names a namespace without loading it as in Clojure."
 ;; cljbang itself.
 (defconst cljbang--special-forms
   '("def" "defn" "defn-" "defmacro" "fn" "let" "set!" "if" "when" "cond" "do"
-    "ns" "require" "quote" "comment" "->" "->>" "time" "with-out-str")
+    "ns" "require" "quote" "comment" "->" "->>" "time")
   "Names `cljbang-compile' handles itself.")
 
 (defun cljbang--compile-body (forms env)
@@ -603,11 +603,6 @@ magti/status without complaining about magit/status."
       ('do `(progn ,@(cljbang--compile-body (cdr form) env)))
       ('-> (cljbang-compile (cljbang--thread (cadr form) (cddr form) t) env))
       ('->> (cljbang-compile (cljbang--thread (cadr form) (cddr form) nil) env))
-      ('with-out-str
-       `(with-temp-buffer
-          (let ((standard-output (current-buffer)))
-            ,@(cljbang--compile-body (cdr form) env))
-          (buffer-string)))
       ('time
        (let ((start (gensym "cljbang-time-"))
              (val (gensym "cljbang-val-")))
@@ -847,6 +842,11 @@ happens once unless RELOAD is non-nil."
     (when reload (remhash ns cljbang--loaded-ns))
     (cljbang--require-ns ns)
     ns))
+
+;; with-out-str needs no compiler support, it is just a macro
+(cljbang--register-macro
+ "with-out-str" nil
+ (lambda (&rest body) (cons 'el/with-output-to-string body)))
 
 (defun cljbang-load-file (file)
   "Load FILE of Clojure source, as if its contents were wrapped in `clj!'.

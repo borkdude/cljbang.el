@@ -198,7 +198,7 @@ Special forms:
 
 ```
 def defn defn- defmacro fn let set! if when cond do ns require quote
-comment -> ->> time with-out-str
+comment -> ->> time
 ```
 
 Clojure calls only a handful of those special forms and defines the rest
@@ -227,7 +227,7 @@ Supported functions:
 ```
 + - * / mod = not= < > <= >= inc dec not odd? even? zero?
 first second rest nth count get contains? conj assoc
-map filter reduce str pr-str println prn name subs
+map filter reduce str pr-str println prn name subs with-out-str
 re-pattern re-find re-matches re-seq
 hash-map hash-set load-file
 ```
