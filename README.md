@@ -208,17 +208,18 @@ of it as unresolved. Tell it otherwise in your own `.clj-kondo/config.edn`:
 {:linters {:unresolved-namespace {:exclude [el]}}}
 ```
 
-## What cljbang understands
+## Clojure API
 
-Special forms:
+In this section we list the currently supported Clojure API.
+
+Cljbang has these special forms:
 
 ```
-def defn defn- defmacro fn let set! if when cond do ns require quote
-comment -> ->>
+def defn defn- defmacro fn let set! if do ns require quote comment
 ```
 
-Clojure calls only a handful of those special forms and defines the rest
-as macros. Cljbang knows them all, for now.
+That is close to Clojure's own list. What Clojure defines as macros,
+cljbang does too.
 
 ### Macros
 
@@ -234,6 +235,12 @@ using `list` and `cons`:
 (unless-neg 5 :ok)                         ;; => :ok
 ```
 
+These ship as macros rather than compiler support:
+
+```
+when cond -> ->> with-out-str time
+```
+
 
 
 ### Functions
@@ -244,7 +251,6 @@ Supported functions:
 + - * / mod = not= < > <= >= inc dec not odd? even? zero?
 first second rest nth count get contains? conj assoc
 map filter reduce str pr-str println prn name subs
-with-out-str time
 re-pattern re-find re-matches re-seq
 hash-map hash-set load-file
 ```
@@ -314,9 +320,11 @@ Inside `clj!` there is no source text to rewrite, so use `hash-set` and
 (clj! (hash-set 1 2))
 ```
 
-Not implemented: syntax quote, so macros build expansions with `list` and
-`cons`. `:strs`, `:syms` and namespaced `:keys`. Protocols and
-multimethods.
+Not implemented (currently):
+
+- syntax quote, so macros build expansions with `list` and
+`cons`. `:strs`, `:syms` and namespaced `:keys`.
+- Protocols and multimethods.
 
 ## Benchmarks
 

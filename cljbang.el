@@ -261,8 +261,8 @@ names a namespace without loading it as in Clojure."
 ;; there.  cljbang knows them all, until enough of it is written in
 ;; cljbang itself.
 (defconst cljbang--special-forms
-  '("def" "defn" "defn-" "defmacro" "fn" "let" "set!" "if" "when" "cond" "do"
-    "ns" "require" "quote" "comment" "->" "->>")
+  '("def" "defn" "defn-" "defmacro" "fn" "let" "set!" "if" "do"
+    "ns" "require" "quote" "comment")
   "Names `cljbang-compile' handles itself.")
 
 (defun cljbang--compile-body (forms env)
@@ -591,18 +591,7 @@ magti/status without complaining about magit/status."
               ,(cljbang-compile (caddr form) env)))
       ('let (cljbang--compile-let (cadr form) (cddr form) env))
       ('if `(if ,@(cljbang--compile-body (cdr form) env)))
-      ('when `(when ,@(cljbang--compile-body (cdr form) env)))
-      ('cond
-       ;; :else needs no special case: a keyword is truthy in elisp too
-       (let ((clauses (cdr form)))
-         (when (cl-oddp (length clauses))
-           (error "cljbang: cond needs an even number of forms"))
-         `(cond ,@(cl-loop for (test expr) on clauses by #'cddr
-                           collect (list (cljbang-compile test env)
-                                         (cljbang-compile expr env))))))
       ('do `(progn ,@(cljbang--compile-body (cdr form) env)))
-      ('-> (cljbang-compile (cljbang--thread (cadr form) (cddr form) t) env))
-      ('->> (cljbang-compile (cljbang--thread (cadr form) (cddr form) nil) env))
       (_ (cljbang--compile-call form env))))))
 
 ;;; Entry point
@@ -836,6 +825,32 @@ happens once unless RELOAD is non-nil."
 
 ;; neither of these needs compiler support, they are just macros.  The
 ;; expansion is cljbang code, so it goes through the compiler in turn.
+(cljbang--register-macro
+ "->" nil
+ (lambda (init &rest forms) (cljbang--thread init forms t)))
+
+(cljbang--register-macro
+ "->>" nil
+ (lambda (init &rest forms) (cljbang--thread init forms nil)))
+
+(cljbang--register-macro
+ "when" nil
+ (lambda (test &rest body) (list 'if test (cons 'do body))))
+
+(cljbang--register-macro
+ "cond" nil
+ (lambda (&rest clauses)
+   (when (cl-oddp (length clauses))
+     (error "cljbang: cond needs an even number of forms"))
+   (let (pairs)
+     (while clauses
+       (push (list (car clauses) (cadr clauses)) pairs)
+       (setq clauses (cddr clauses)))
+     ;; pairs runs backwards, so folding builds the ifs inside out
+     (let (expansion)
+       (dolist (pair pairs expansion)
+         (setq expansion (list 'if (car pair) (cadr pair) expansion)))))))
+
 (cljbang--register-macro
  "with-out-str" nil
  (lambda (&rest body) (cons 'el/with-output-to-string body)))
