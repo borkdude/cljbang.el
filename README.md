@@ -244,9 +244,11 @@ Build a macro with a syntax quote, unquoting with `~` and `~@`:
 
 An unqualified name is qualified to the namespace where the macro is
 written, not where it expands, so a macro can call its own namespace's
-functions from anywhere. The var does not have to exist yet. What cljbang
-defines itself stays as it is, so `if`, `let`, `map` and `when` need
-nothing, and a host name takes `el/`:
+functions from anywhere. The var does not have to exist yet. A core
+function resolves to what it calls and a macro cljbang ships is named in
+`cljbang.core`, so neither can be taken by a name where the macro
+expands. Special forms are matched before anything is resolved, so `let`
+and `if` stay as they are. A host name takes `el/`:
 
 ```clojure
 (ns my.config)

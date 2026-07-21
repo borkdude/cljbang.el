@@ -98,11 +98,6 @@
 ;; defined all live in `cljbang--ns-state', which cljbang-core.el owns
 ;; because a compiled file sets the namespace when it loads.
 
-(defvar cljbang--macros (make-hash-table :test #'equal)
-  "Macro name -> expander function.
-Registered while compiling, so a later form in the same file can use a
-macro defined above it, as the var table does for defn.")
-
 (defvar cljbang--expanding 0
   "Depth of macro expansion, to catch a macro that expands to itself.")
 
@@ -211,12 +206,6 @@ PRIVATE gives the double dash elisp uses for internal names."
 ;; (el/my/flymake-inline-ov keeps its slash) and the cljbang--core-fns
 ;; overrides, so elisp's own get, assoc, + ... stay reachable.
 
-(defun cljbang--register-macro (name ns expander)
-  "Register EXPANDER as the macro NAME, in NS when there is one."
-  (puthash name expander cljbang--macros)
-  (when ns (puthash (concat ns "/" name) expander cljbang--macros))
-  nil)
-
 (defun cljbang--spec-parts (spec)
   "SPEC as a list, whatever shape a require wrote it in."
   (if (vectorp spec) (append spec nil) (list spec)))
@@ -246,19 +235,6 @@ names a namespace without loading it as in Clojure."
                       (when-let* ((alias (cljbang--spec-alias spec)))
                         `(cljbang--ns-add-alias ',(car alias) ,(cdr alias))))
                     specs)))
-
-(defun cljbang--macro-function (sym)
-  "Expander registered for SYM, plain or namespace qualified, or nil."
-  (let ((name (symbol-name sym))
-        (current (cljbang--current-ns)))
-    (or (and current
-             (gethash (concat current "/" name) cljbang--macros))
-        (gethash name cljbang--macros)
-        (when (string-search "/" name)
-          (pcase-let ((`(,ns ,n) (split-string name "/")))
-            (gethash (concat (or (cdr (assq (intern ns) (cljbang--ns-aliases))) ns)
-                             "/" n)
-                     cljbang--macros))))))
 
 (defun cljbang--el-symbol (sym)
   "Elisp symbol named by an el/ qualified SYM, or nil."
@@ -557,6 +533,10 @@ carries a host name, the way Clojure leaves interop alone."
      ;; expands would take its place.  A special form or a macro cannot be
      ;; taken that way, being looked up before any var, so it stays as it is
      ((alist-get sym cljbang--core-fns))
+     ;; a macro cljbang ships is named in its own namespace, so a macro of
+     ;; that name where this one expands cannot take its place
+     ((gethash name (cljbang--ns-macro-table cljbang--core-ns))
+      (intern (concat cljbang--core-ns "/" name)))
      ((cljbang--macro-function sym) sym)
      ((cljbang--current-ns)
       (intern (concat (cljbang--munge-ns (cljbang--current-ns)) "-" name)))
@@ -1295,12 +1275,12 @@ happens once unless RELOAD is non-nil."
 
 ;; neither of these needs compiler support, they are just macros.  The
 ;; expansion is cljbang code, so it goes through the compiler in turn.
-(cljbang--register-macro
- "->" nil
+(cljbang--register-builtin-macro
+ "->"
  (lambda (init &rest forms) (cljbang--thread init forms t)))
 
-(cljbang--register-macro
- "->>" nil
+(cljbang--register-builtin-macro
+ "->>"
  (lambda (init &rest forms) (cljbang--thread init forms nil)))
 
 ;; the constants are not evaluated, so they are quoted into the test.  A
@@ -1332,24 +1312,24 @@ happens once unless RELOAD is non-nil."
                                               (list 'cljbang--map-literal
                                                     :value val))))))))))
 
-(cljbang--register-macro
- "case" nil
+(cljbang--register-builtin-macro
+ "case"
  (lambda (expr &rest clauses) (cljbang--case expr clauses)))
 
-(cljbang--register-macro
- "some->" nil
+(cljbang--register-builtin-macro
+ "some->"
  (lambda (init &rest forms) (cljbang--some-thread init forms t)))
 
-(cljbang--register-macro
- "some->>" nil
+(cljbang--register-builtin-macro
+ "some->>"
  (lambda (init &rest forms) (cljbang--some-thread init forms nil)))
 
-(cljbang--register-macro
- "when" nil
+(cljbang--register-builtin-macro
+ "when"
  (lambda (test &rest body) (list 'if test (cons 'do body))))
 
-(cljbang--register-macro
- "cond" nil
+(cljbang--register-builtin-macro
+ "cond"
  (lambda (&rest clauses)
    (when (cl-oddp (length clauses))
      (error "cljbang: cond needs an even number of forms"))
@@ -1374,12 +1354,12 @@ happens once unless RELOAD is non-nil."
                 (list 'let (vector (aref binding 0) test) then)
                 else))))
 
-(cljbang--register-macro
- "if-let" nil
+(cljbang--register-builtin-macro
+ "if-let"
  (lambda (binding then &optional else) (cljbang--if-let binding then else)))
 
-(cljbang--register-macro
- "when-let" nil
+(cljbang--register-builtin-macro
+ "when-let"
  (lambda (binding &rest body) (cljbang--if-let binding (cons 'do body) nil)))
 
 ;; seq-do rather than dolist, since the binding is a cljbang pattern and
@@ -1427,20 +1407,20 @@ happens once unless RELOAD is non-nil."
                 (list 'set! i (list 'inc i)))
           nil)))
 
-(cljbang--register-macro
- "doseq" nil
+(cljbang--register-builtin-macro
+ "doseq"
  (lambda (bindings &rest body) (cljbang--doseq bindings body)))
 
-(cljbang--register-macro
- "dotimes" nil
+(cljbang--register-builtin-macro
+ "dotimes"
  (lambda (binding &rest body) (cljbang--dotimes binding body)))
 
-(cljbang--register-macro
- "with-out-str" nil
+(cljbang--register-builtin-macro
+ "with-out-str"
  (lambda (&rest body) (cons 'el/with-output-to-string body)))
 
-(cljbang--register-macro
- "time" nil
+(cljbang--register-builtin-macro
+ "time"
  (lambda (expr)
    (let ((start (gensym "cljbang-start-"))
          (val (gensym "cljbang-val-")))
