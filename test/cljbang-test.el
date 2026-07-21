@@ -209,6 +209,16 @@
                 "(defmacro shadowed [x] (list '+ x 100))
                  (let [shadowed (fn [n] n)] (shadowed 5))"))))
 
+(ert-deftest cljbang-test-truthiness ()
+  "nil is the only false value in elisp, and an empty list is nil."
+  (should (eq :y (cljbang-test--eval "(if 0 :y :n)")))
+  (should (eq :y (cljbang-test--eval "(if \"\" :y :n)")))
+  (should (eq :y (cljbang-test--eval "(if [] :y :n)")))
+  (should (eq :y (cljbang-test--eval "(if {} :y :n)")))
+  (should (eq :n (cljbang-test--eval "(if false :y :n)")))
+  ;; Clojure says :y here, and elisp cannot, since '() is nil
+  (should (eq :n (cljbang-test--eval "(if (list) :y :n)"))))
+
 ;;; Special forms
 
 (ert-deftest cljbang-test-cond ()

@@ -344,6 +344,10 @@ Host semantics win where they conflict, unless otherwise noted, like in Squint.
 - `/` is elisp division: integers, no ratios
 - characters are integers, so `(nth "abc" 0)` is `97`
 - `assoc` copies the map, so it is O(n)
+- an empty list is false, because elisp has no empty list distinct from
+  `nil`. `0`, `""`, `[]` and `{}` are all true as in Clojure, and `false`
+  compiles to `nil`, but `(if '() :y :n)` is `:n` here and `:y` in
+  Clojure
 - `#{...}` and `#(...)` need source text and so do not work inside `clj!`.
   Use `hash-set` and `fn` there, or move your source to a `.clj` file.
 - `:strs`, `:syms` and namespaced `:keys` are not implemented
