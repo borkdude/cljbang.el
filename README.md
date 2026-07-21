@@ -45,8 +45,24 @@ Requires Emacs 28.1 or later.
 
 ```emacs-lisp
 (use-package cljbang
-  :vc (:url "https://github.com/borkdude/cljbang"))
+  :vc (:url "https://github.com/borkdude/cljbang.el"))
 ```
+
+From a clone, put the directory on the load path and require what you
+need. `cljbang-mode` pulls in the compiler and the runtime, so it is the
+one to ask for if you want inline evaluation:
+
+```emacs-lisp
+(add-to-list 'load-path "~/dev/cljbang.el")
+(require 'cljbang-mode)
+
+;; then load your own Clojure
+(cljbang-load-file "~/.emacs.d/config.clj")
+```
+
+Without the editor integration, `(require 'cljbang)` is enough to compile
+and load, and `(require 'cljbang-core)` alone is enough to run code that
+was byte-compiled earlier.
 
 ## Usage
 
@@ -192,13 +208,13 @@ of it as unresolved. Tell it otherwise in your own `.clj-kondo/config.edn`:
 {:linters {:unresolved-namespace {:exclude [el]}}}
 ```
 
-## Supported
+## What cljbang understands
 
 Special forms:
 
 ```
 def defn defn- defmacro fn let set! if when cond do ns require quote
-comment -> ->> time
+comment -> ->>
 ```
 
 Clojure calls only a handful of those special forms and defines the rest
@@ -227,7 +243,8 @@ Supported functions:
 ```
 + - * / mod = not= < > <= >= inc dec not odd? even? zero?
 first second rest nth count get contains? conj assoc
-map filter reduce str pr-str println prn name subs with-out-str
+map filter reduce str pr-str println prn name subs
+with-out-str time
 re-pattern re-find re-matches re-seq
 hash-map hash-set load-file
 ```

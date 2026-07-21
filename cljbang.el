@@ -2,7 +2,7 @@
 
 ;; Version: 0.0.1
 ;; Package-Requires: ((emacs "28.1"))
-;; Homepage: https://github.com/borkdude/cljbang
+;; Homepage: https://github.com/borkdude/cljbang.el
 ;; Keywords: languages, lisp
 
 ;;; Commentary:
@@ -262,7 +262,7 @@ names a namespace without loading it as in Clojure."
 ;; cljbang itself.
 (defconst cljbang--special-forms
   '("def" "defn" "defn-" "defmacro" "fn" "let" "set!" "if" "when" "cond" "do"
-    "ns" "require" "quote" "comment" "->" "->>" "time")
+    "ns" "require" "quote" "comment" "->" "->>")
   "Names `cljbang-compile' handles itself.")
 
 (defun cljbang--compile-body (forms env)
@@ -603,15 +603,6 @@ magti/status without complaining about magit/status."
       ('do `(progn ,@(cljbang--compile-body (cdr form) env)))
       ('-> (cljbang-compile (cljbang--thread (cadr form) (cddr form) t) env))
       ('->> (cljbang-compile (cljbang--thread (cadr form) (cddr form) nil) env))
-      ('time
-       (let ((start (gensym "cljbang-time-"))
-             (val (gensym "cljbang-val-")))
-         `(let* ((,start (current-time))
-                 (,val ,(cljbang-compile (cadr form) env)))
-            (cljbang-println
-             (format "Elapsed time: %.6f msecs"
-                     (* 1000 (float-time (time-subtract (current-time) ,start)))))
-            ,val)))
       (_ (cljbang--compile-call form env))))))
 
 ;;; Entry point
@@ -843,10 +834,26 @@ happens once unless RELOAD is non-nil."
     (cljbang--require-ns ns)
     ns))
 
-;; with-out-str needs no compiler support, it is just a macro
+;; neither of these needs compiler support, they are just macros.  The
+;; expansion is cljbang code, so it goes through the compiler in turn.
 (cljbang--register-macro
  "with-out-str" nil
  (lambda (&rest body) (cons 'el/with-output-to-string body)))
+
+(cljbang--register-macro
+ "time" nil
+ (lambda (expr)
+   (let ((start (gensym "cljbang-start-"))
+         (val (gensym "cljbang-val-")))
+     (list 'let (vector start '(el/current-time)
+                        val expr)
+           (list 'println
+                 (list 'el/format "Elapsed time: %.6f msecs"
+                       (list '* 1000
+                             (list 'el/float-time
+                                   (list 'el/time-subtract
+                                         '(el/current-time) start)))))
+           val))))
 
 (defun cljbang-load-file (file)
   "Load FILE of Clojure source, as if its contents were wrapped in `clj!'.

@@ -103,6 +103,29 @@
   (should (equal "#(not a fn)" (cljbang-test--eval "(#(str \"#(not a fn)\"))"))))
 
 
+(ert-deftest cljbang-test-time-and-with-out-str-are-macros ()
+  "Both are macros in Clojure, so the compiler does not know them."
+  (should (cljbang--macro-function 'time))
+  (should (cljbang--macro-function 'with-out-str))
+  (should-not (member "time" cljbang--special-forms))
+  (should-not (member "with-out-str" cljbang--special-forms)))
+
+(ert-deftest cljbang-test-with-out-str ()
+  (should (equal "a\nb\n"
+                 (cljbang-test--eval "(with-out-str (println \"a\") (println \"b\"))"))))
+
+(ert-deftest cljbang-test-time ()
+  "Returns the value, prints the elapsed time, and evaluates once."
+  (should (= 3 (cljbang-test--eval "(time (+ 1 2))")))
+  (should (string-match-p "Elapsed time: .* msecs"
+                          (cljbang-test--eval "(with-out-str (time (+ 1 2)))")))
+  (defvar cljbang-test--time-calls 0)
+  (setq cljbang-test--time-calls 0)
+  (defalias 'cljbang-test--bump
+    (lambda () (setq cljbang-test--time-calls (1+ cljbang-test--time-calls))))
+  (cljbang-test--eval "(with-out-str (time (cljbang-test--bump)))")
+  (should (= 1 cljbang-test--time-calls)))
+
 ;;; Regexes
 
 (ert-deftest cljbang-test-regex-literal ()
@@ -519,7 +542,10 @@
         (progn
           (write-region "(ns cachedmac)\n(defmacro dbl [x] (list '* x 2))\n" nil f nil 'quiet)
           (cljbang-load-file f)
-          (clrhash cljbang--macros)              ; forget the compile-time registration
+          ;; forget only this macro, the table also holds the ones
+          ;; cljbang registers at startup
+          (remhash "dbl" cljbang--macros)
+          (remhash "cachedmac/dbl" cljbang--macros)
           (load (cljbang--cache-file f) nil t)   ; only the cache
           (setq cljbang--current-ns nil)
           (should (= 42 (cljbang-test--eval "(cachedmac/dbl 21)"))))
