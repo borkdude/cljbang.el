@@ -89,9 +89,17 @@ macro defined above it, as `cljbang--ns-vars' does for defn.")
 
 ;;; Loading what :require names
 
-(defvar cljbang-load-path nil
-  "Directories searched for the .clj files named in a :require.
-The source root of the file being loaded is searched first.")
+(defgroup cljbang nil
+  "Clojure that runs as Emacs Lisp."
+  :group 'languages
+  :prefix "cljbang-")
+
+(defcustom cljbang-load-path nil
+  "Directories searched for the .clj files a require names.
+The source root of the file being loaded is searched first, so this is
+what `cljbang-require' has to go on when called from elisp."
+  :type '(repeat directory)
+  :group 'cljbang)
 
 (defvar cljbang--loaded-ns (make-hash-table :test #'equal)
   "Namespaces already loaded, so a :require happens once.")
@@ -192,6 +200,20 @@ PRIVATE gives the double dash elisp uses for internal names."
   (when ns (puthash (concat ns "/" name) expander cljbang--macros))
   nil)
 
+(defun cljbang--require-spec (spec)
+  "Register the alias in SPEC and load what it names.
+Returns the namespace to load at run time, or nil for :as-alias, which
+names a namespace without loading it as in Clojure."
+  (let* ((spec (if (vectorp spec) (append spec nil) (list spec)))
+         (required (symbol-name (car spec)))
+         (alias-only (cadr (memq :as-alias spec)))
+         (as (or (cadr (memq :as spec)) alias-only)))
+    (when as
+      (setf (alist-get as cljbang--ns-alias-map) required))
+    (unless alias-only
+      (cljbang--require-ns required)
+      required)))
+
 (defun cljbang--macro-function (sym)
   "Expander registered for SYM, plain or namespace qualified, or nil."
   (let ((name (symbol-name sym)))
@@ -238,7 +260,7 @@ PRIVATE gives the double dash elisp uses for internal names."
 ;; cljbang itself.
 (defconst cljbang--special-forms
   '("def" "defn" "defn-" "defmacro" "fn" "let" "set!" "if" "when" "cond" "do"
-    "ns" "quote" "comment" "->" "->>" "time" "with-out-str")
+    "ns" "require" "quote" "comment" "->" "->>" "time" "with-out-str")
   "Names `cljbang-compile' handles itself.")
 
 (defun cljbang--compile-body (forms env)
@@ -481,26 +503,33 @@ key is the pattern and the value is the map key to look up."
       ('cljbang--fn-literal (cljbang--compile-fn-literal (cdr form) env))
       ('quote form)
       ('comment nil)
+      ('require
+       ;; specs are quoted, as in Clojure
+       (let ((loaded (mapcar (lambda (arg)
+                               (cljbang--require-spec
+                                (if (and (consp arg) (eq (car arg) 'quote))
+                                    (cadr arg)
+                                  arg)))
+                             (cdr form))))
+         `(progn ,@(mapcar (lambda (ns) `(cljbang-require ,ns))
+                           (delq nil loaded))
+                 nil)))
       ('ns
        (let* ((name (symbol-name (cadr form)))
               (cljbang--load-file-dir (or (cljbang--ns-root name)
                                           cljbang--load-file-dir)))
          (setq cljbang--current-ns name)
          ;; register (:require [lib :as alias]) clauses
-         (dolist (clause (cddr form))
-           (when (and (consp clause) (eq (car clause) :require))
-             (dolist (spec (cdr clause))
-               (let* ((spec (if (vectorp spec) (append spec nil) (list spec)))
-                      (required (symbol-name (car spec)))
-                      (alias-only (cadr (memq :as-alias spec)))
-                      (as (or (cadr (memq :as spec)) alias-only)))
-                 (when as
-                   (setf (alist-get as cljbang--ns-alias-map) required))
-                 ;; :as-alias names a namespace without loading it, as in
-                 ;; Clojure.  Plain :require loads.
-                 (unless alias-only
-                   (cljbang--require-ns required))))))
-         `(setq cljbang--current-ns ,name)))
+         (let (loaded)
+           (dolist (clause (cddr form))
+             (when (and (consp clause) (eq (car clause) :require))
+               (dolist (spec (cdr clause))
+                 (push (cljbang--require-spec spec) loaded))))
+           ;; the loads are emitted as well as run, so a file restored
+           ;; from its cache still pulls in what it requires
+           `(progn (setq cljbang--current-ns ,name)
+                   ,@(mapcar (lambda (ns) `(cljbang-require ,ns))
+                             (delq nil (nreverse loaded)))))))
       ('def
        (pcase-let* ((`(,name ,val) (cdr form))
                     (name* (cljbang--ns-intern name)))
@@ -766,6 +795,17 @@ again, which is what makes a .clj file as cheap to load as elisp."
         (cljbang--load-file-dir (file-name-directory (expand-file-name file))))
     (cljbang-eval-string src)))
 
+(defun cljbang-require (ns &optional reload)
+  "Load namespace NS, the way a :require inside an ns form does.
+NS is a symbol or a string.  It resolves to a .clj file along
+`cljbang-load-path', or to an elisp feature of that name.  Loading
+happens once unless RELOAD is non-nil."
+  (interactive "SNamespace: ")
+  (let ((ns (if (stringp ns) ns (symbol-name ns))))
+    (when reload (remhash ns cljbang--loaded-ns))
+    (cljbang--require-ns ns)
+    ns))
+
 (defun cljbang-load-file (file)
   "Load FILE of Clojure source, as if its contents were wrapped in `clj!'.
 The compiled result is cached beside FILE and reused until FILE changes,
@@ -777,7 +817,11 @@ last form."
          (cache (cljbang--cache-file file))
          ;; an (ns ...) in the file takes effect during the load only,
          ;; whether it ran now or was baked into the cache
-         (cljbang--current-ns cljbang--current-ns))
+         (cljbang--current-ns cljbang--current-ns)
+         ;; a require emitted into the cache resolves against the same
+         ;; place it did when the file was compiled
+         (cljbang--load-file-name file)
+         (cljbang--load-file-dir (file-name-directory file)))
     (cond
      ((file-newer-than-file-p cache file)
       (load cache nil t)

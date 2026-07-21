@@ -15,13 +15,9 @@ This project is heavily influenced by how I wrote [Squint](https://squint-cljs.g
 - Light-weight: compilation happens at macro-expansion, so a byte-compiled file costs nothing at load. Uncompiled, about 70ms per 1000 defns.
 - Performance first: compiled output should run fast, in the same ballpark as elisp
 
-My previous attempt at a similar project to bring Clojure to Elisp involved a
-transpiler. But I don't think using a transpiler in Emacs is user friendly for
-writing quick functions and scripts.  Instead this project is a lite compiler
-sitting in your elisp runtime and integrates tightly with it. You can just evaluate "Clojure" (in the cljbang dialect) as Elisp in a `.clj` buffer.
+An example.
 
-
-Which buffers are visiting a file that is no longer there:
+Wwhich buffers are visiting a file that is no longer there?
 
 ```clojure
 (defn stale-buffers []
@@ -42,9 +38,8 @@ The same thing in Emacs Lisp, which is what it compiles to:
           (push (buffer-name b) result))))))
 ```
 
-Same buffers, no subprocess, no bridge. `buffer-list`, `buffer-file-name`
-and `file-exists-p` are the Emacs functions you already know, reached
-through `el/`.
+This is running in the same process, without any subproceses, just a light-weight transform to Elisp and using some of the cljbang's standard library functions
+The functions `buffer-list`, `buffer-file-name` and `file-exists-p` are the Emacs functions you already know, reached through `el/`.
 
 ## Installation
 
@@ -54,18 +49,6 @@ Requires Emacs 28.1 or later.
 (use-package cljbang
   :vc (:url "https://github.com/borkdude/cljbang"))
 ```
-
-Three files, so you can load only what you need:
-
-| | |
-|---|---|
-| `cljbang-core.el` | the runtime compiled code calls. Depends on nothing else |
-| `cljbang-string.el` | `clojure.string`, aliased to `str` |
-| `cljbang.el` | the compiler, `clj!` and `cljbang-load-file` |
-| `cljbang-mode.el` | inline evaluation, result overlays, completion |
-
-A byte-compiled file that uses `clj!` needs only `cljbang-core` at load
-time, because the macro is already expanded.
 
 ## Usage
 
@@ -87,13 +70,17 @@ Cljbang gives a better overall feeling when you move the source code to a `.clj`
 (cljbang-load-file "example.clj")
 ```
 
+or:
+
+```emacs-lisp
+(cljbang-require 'example)
+```
+
 The compiled result is cached beside the file as
 `example.clj.30-0.0.1.elc` and reused until you edit the source, so this
 costs about what loading the equivalent elisp would. The name carries the
 Emacs version and the cljbang version, so upgrading either one rebuilds
-rather than loading output the current compiler would not produce. A
-directory that cannot be written simply gets no cache. Ignore them in
-version control:
+rather than loading output the current compiler would not produce. 
 
 ```
 *.clj.*.elc
@@ -152,6 +139,16 @@ From cljbang code, reach them with the namespace:
 
 The `ns` is in effect only while the file loads, so it does not leak into
 whatever you evaluate next.
+
+A file with no `ns` form can require at the top level, and elisp can too:
+
+```clojure
+(require '[lib.b :as b])
+```
+
+```emacs-lisp
+(cljbang-require 'lib.b)
+```
 
 ### Requiring
 
@@ -249,8 +246,8 @@ whatever any alias says.
 Special forms:
 
 ```
-def defn defn- defmacro fn let set! if when cond do ns quote comment
--> ->> time with-out-str
+def defn defn- defmacro fn let set! if when cond do ns require quote
+comment -> ->> time with-out-str
 ```
 
 Clojure calls only a handful of those special forms and defines the rest
@@ -399,4 +396,4 @@ bb compile
 
 ## License
 
-EPL-1.0
+MIT

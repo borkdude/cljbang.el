@@ -524,6 +524,44 @@ otherwise be picked up by the next one."
     (should (equal "hello from b: a" (app-a-run))))
   (setq cljbang--current-ns nil))
 
+(ert-deftest cljbang-test-cached-file-still-loads-its-requires ()
+  "A require runs at compile time, so the cache has to carry it too."
+  (let* ((dir (make-temp-file "cljbang-req" t))
+         (lib (expand-file-name "lib/c.clj" dir))
+         (app (expand-file-name "useslib.clj" dir)))
+    (unwind-protect
+        (progn
+          (make-directory (expand-file-name "lib" dir) t)
+          (write-region "(ns lib.c)\n(defn from-c [] :c)\n" nil lib nil 'quiet)
+          (write-region "(ns uses (:require [lib.c :as c]))\n(defn run [] (c/from-c))\n"
+                        nil app nil 'quiet)
+          (cljbang-load-file app)               ; cold, builds the cache
+          (should (eq :c (uses-run)))
+          ;; forget everything the compiler learned, then load only the cache
+          (clrhash cljbang--loaded-ns)
+          (fmakunbound 'lib-c-from-c)
+          (cljbang-load-file app)
+          (should (fboundp 'lib-c-from-c))
+          (should (eq :c (uses-run))))
+      (delete-directory dir t)
+      (setq cljbang--current-ns nil))))
+
+(ert-deftest cljbang-test-require-form-without-ns ()
+  "(require '[lib :as l]) works in a file that has no ns form."
+  (cljbang-test--clear-caches)
+  (clrhash cljbang--loaded-ns)
+  (let ((cljbang-load-path (list (expand-file-name "test/requires" cljbang-test--root))))
+    (should (cljbang-test--eval "(require '[lib.b :as lb]) (lb/hello \"x\")")))
+  (setq cljbang--current-ns nil))
+
+(ert-deftest cljbang-test-cljbang-require-from-elisp ()
+  (cljbang-test--clear-caches)
+  (clrhash cljbang--loaded-ns)
+  (let ((cljbang-load-path (list (expand-file-name "test/requires" cljbang-test--root))))
+    (should (equal "lib.b" (cljbang-require 'lib.b)))
+    (should (fboundp 'lib-b-hello)))
+  (setq cljbang--current-ns nil))
+
 (ert-deftest cljbang-test-require-loads-elisp-feature ()
   (clrhash cljbang--loaded-ns)
   (cljbang-test--eval "(ns reqfeat (:require [subr-x :as sx]))")
