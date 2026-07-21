@@ -199,6 +199,36 @@
   (should-error (cljbang-test--eval "(a/b/c)")))
 
 
+(ert-deftest cljbang-test-warns-on-unresolved-qualified-name ()
+  "A typo should be caught at compile time, an autoload should not warn."
+  (let (warnings)
+    (cl-letf (((symbol-function 'display-warning)
+               (lambda (_type msg &rest _) (push msg warnings))))
+      (defalias 'wt-known (lambda () :x))
+      (cljbang-compile '(wt/known))
+      (should-not warnings)
+      (cljbang-compile '(wt/missing))
+      (should (= 1 (length warnings)))
+      (should (string-match-p "wt-missing" (car warnings))))))
+
+(ert-deftest cljbang-test-no-warning-for-own-namespace ()
+  "A var cljbang interned is fine even before it is evaluated."
+  (let (warnings)
+    (cl-letf (((symbol-function 'display-warning)
+               (lambda (_type msg &rest _) (push msg warnings))))
+      (cljbang-eval-string "(ns selftest) (defn a [] 1)")
+      (cljbang-compile '(selftest/a))
+      (should-not warnings)))
+  (setq cljbang--current-ns nil))
+
+(ert-deftest cljbang-test-warning-can-be-turned-off ()
+  (let (warnings)
+    (cl-letf (((symbol-function 'display-warning)
+               (lambda (_type msg &rest _) (push msg warnings))))
+      (let ((cljbang-warn-unresolved nil))
+        (cljbang-compile '(nothing/here)))
+      (should-not warnings))))
+
 ;;; set!
 
 (ert-deftest cljbang-test-set-bang-local ()

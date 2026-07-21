@@ -457,6 +457,35 @@ key is the pattern and the value is the map key to look up."
          `#',(alist-get form cljbang--core-fns))
         (t `(cljbang--resolve ',form))))
 
+(defcustom cljbang-warn-unresolved t
+  "Whether to warn when a qualified name resolves to nothing defined.
+An autoloaded function counts as defined, so this catches a typo like
+magti/status without complaining about magit/status."
+  :type 'boolean
+  :group 'cljbang)
+
+(defun cljbang--interned-here-p (sym)
+  "Whether SYM is a var cljbang interned, which may not be evaluated yet."
+  (catch 'cljbang--found
+    (maphash (lambda (_ns vars)
+               (maphash (lambda (_name s)
+                          (when (eq s sym) (throw 'cljbang--found t)))
+                        vars))
+             cljbang--ns-vars)
+    nil))
+
+(defun cljbang--warn-unresolved (sym original)
+  "Warn that ORIGINAL resolved to SYM, which nothing defines."
+  (when (and cljbang-warn-unresolved
+             (not (fboundp sym))
+             (not (boundp sym))
+             (not (cljbang--interned-here-p sym)))
+    (display-warning 'cljbang
+                     (format "%s resolves to %s, which is not defined"
+                             original sym)
+                     :warning))
+  sym)
+
 (defun cljbang--compile-call (form env)
   "Compile FORM, a macro call or a function call, in ENV."
   (let ((head (car form)))
@@ -474,7 +503,7 @@ key is the pattern and the value is the map key to look up."
          ;; a keyword looks itself up, and is a symbol, so test it first
          ((keywordp head) `(cljbang-get ,(car args) ,head ,@(cdr args)))
          ((and (symbolp head) (cljbang--qualified head))
-          `(,(cljbang--qualified head) ,@args))
+          `(,(cljbang--warn-unresolved (cljbang--qualified head) head) ,@args))
          ((and (symbolp head) (cljbang--ns-resolve head))
           `(,(cljbang--ns-resolve head) ,@args))
          ((and (symbolp head) (alist-get head cljbang--core-fns))

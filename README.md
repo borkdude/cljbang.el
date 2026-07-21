@@ -157,8 +157,14 @@ only thing that satisfies it on its own but loads magit when the file
 loads, or stay bare and add the packages you call to the same exclude
 list as `el`, below.
 
-Going bare means a typo like `(magti/status)` fails when it is called
-rather than at load.
+Going bare means a typo is caught at compile time rather than by
+clj-kondo, since an autoload counts as defined:
+
+```
+Warning (cljbang): magti/status resolves to magti-status, which is not defined
+```
+
+Set `cljbang-warn-unresolved` to nil to turn that off.
 
 ## Interop
 
