@@ -332,6 +332,12 @@ Compiled output is plain elisp, so this is close to parity. Collection
 code is further off, since `map` and `filter` dispatch through a wrapper
 so a set or keyword can be used as a function, and `assoc` copies.
 
+In practice cljbang incurs little overhead. A byte-compiled file costs
+about a millisecond more to load than the elisp it became, and runs
+within about ten percent of it. For configuration code that is not
+something you will notice. The case to avoid is loading `.clj` source at
+startup, where the compiler runs every time.
+
 ## Test
 
 ```
