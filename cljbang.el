@@ -172,16 +172,16 @@ which are vector-like, out of the lookup branches."
 ;;; Namespaced symbols: str/join etc.
 ;;
 ;; Elisp symbols happily contain `/', so qualified Clojure symbols read
-;; as-is.  Aliases map to full namespace names; known vars map to
-;; Clojure-semantics wrappers; anything else munges ns/name -> ns--name
-;; (dots to dashes), the elisp package convention.  The munge doubles as
-;; interop: (mylib/frob x) calls elisp `mylib--frob'.
+;; as-is.  Aliases map to full namespace names, known vars map to
+;; Clojure-semantics wrappers, and anything else munges ns/name to
+;; ns-name with dots as dashes.  The munge doubles as interop:
+;; (magit/status) calls elisp `magit-status'.
 
 (defconst cljbang--ns-aliases
   '((str . "clojure.string")))
 
 ;; Current namespace: (ns foo) makes subsequent defn/def intern munged
-;; names (foobar -> foo--foobar), and unqualified references to names
+;; names (bar -> foo-bar, or foo--bar for defn-), and references to names
 ;; defined in the current ns resolve to those munged symbols.  The
 ;; registry is consulted at compile time, so within one clj! block a
 ;; later form can call an earlier defn even though nothing has been
@@ -199,24 +199,33 @@ which are vector-like, out of the lookup branches."
 (defun cljbang--munge-ns (ns)
   (string-replace "." "-" ns))
 
-(defun cljbang--ns-intern (name)
-  "Munged elisp symbol for NAME in the current ns; records the var."
+;; Elisp spells the distinction Clojure draws with defn- : one dash for
+;; the public API, two for what is internal to a package.  Public is the
+;; common case, and it is what ns-qualified interop has to produce to
+;; reach names like magit-status.
+
+(defun cljbang--ns-intern (name &optional private)
+  "Munged elisp symbol for NAME in the current ns; records the var.
+PRIVATE gives the double dash elisp uses for internal names."
   (if cljbang--current-ns
       (let ((vars (or (gethash cljbang--current-ns cljbang--ns-vars)
                       (puthash cljbang--current-ns
                                (make-hash-table :test #'equal)
-                               cljbang--ns-vars))))
-        (puthash (symbol-name name) t vars)
-        (intern (concat (cljbang--munge-ns cljbang--current-ns)
-                        "--" (symbol-name name))))
+                               cljbang--ns-vars)))
+            (sym (intern (concat (cljbang--munge-ns cljbang--current-ns)
+                                 (if private "--" "-")
+                                 (symbol-name name)))))
+        ;; store the symbol, so resolving does not have to guess which
+        ;; spelling this var was defined with
+        (puthash (symbol-name name) sym vars)
+        sym)
     name))
 
 (defun cljbang--ns-resolve (sym)
   "Munged symbol for SYM when it names a var in the current ns, else nil."
   (when-let* ((ns cljbang--current-ns)
               (vars (gethash ns cljbang--ns-vars)))
-    (when (gethash (symbol-name sym) vars)
-      (intern (concat (cljbang--munge-ns ns) "--" (symbol-name sym))))))
+    (gethash (symbol-name sym) vars)))
 
 (defun cljbang-string-join (sep-or-coll &optional coll)
   (let ((sep (if coll sep-or-coll ""))
@@ -267,7 +276,9 @@ which are vector-like, out of the lookup branches."
                                    (cdr (assq (intern ns) cljbang--ns-aliases))
                                    ns)))
               (or (cdr (assoc (concat full "/" n) cljbang--ns-fns))
-                  (intern (concat (string-replace "." "-" full) "--" n)))))))))
+                  ;; one dash: the public elisp API, so lib/thing reaches
+                  ;; lib-thing.  Use el/lib--thing for an internal name.
+                  (intern (concat (string-replace "." "-" full) "-" n)))))))))
 
 ;;; Compiler: Clojure form -> elisp form
 
@@ -509,9 +520,9 @@ key is the pattern and the value is the map key to look up."
          `(progn (defvar ,name* nil)
                  (setq ,name* ,(cljbang-compile val env))
                  ',name*)))
-      ('defn
+      ((or 'defn 'defn-)
        (pcase-let* ((`(,name ,params . ,body) (cdr form))
-                    (name* (cljbang--ns-intern name)))
+                    (name* (cljbang--ns-intern name (eq (car form) 'defn-))))
          `(progn (defalias ',name* ,(cljbang--compile-fn params body env))
                  ',name*)))
       ('fn
@@ -780,7 +791,7 @@ Elsewhere falls back to `eval-last-sexp'."
 ;;; Completion: Clojure names + all of elisp, via completion-at-point
 
 (defconst cljbang--special-forms
-  '("def" "defn" "fn" "let" "set!" "if" "when" "cond" "do" "ns" "quote"
+  '("def" "defn" "defn-" "fn" "let" "set!" "if" "when" "cond" "do" "ns" "quote"
     "comment" "->" "->>" "time" "with-out-str")
   "Names handled as special forms by `cljbang-compile'.")
 

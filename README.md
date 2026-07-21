@@ -64,23 +64,29 @@ callable from elisp afterwards. Without an `ns` form the name is used as is:
 answer          ;; => 42
 ```
 
-An `ns` form prefixes them instead. Dots become dashes, then `--` joins the
-name, which is the usual elisp convention for a package-private symbol:
+An `ns` form prefixes them instead, following the elisp convention: one
+dash for the public API, two for what is internal to a package. `defn-`
+gives you the second.
 
 ```clojure
 ;; my_config.clj
 (ns my.config)
 (defn greet [x] (str "hello " x))
+(defn- shout [x] (upcase x))
 (def answer 7)
 ```
 
 ```emacs-lisp
 (cljbang-load-file "my_config.clj")
-(my-config--greet "you")   ;; => "hello you"
-my-config--answer          ;; => 7
+(my-config-greet "you")   ;; => "hello you"
+my-config-answer          ;; => 7
+(my-config--shout "hey")  ;; => "HEY"   internal, two dashes
 ```
 
-From Clojure, reach them with the namespace:
+Dots in the namespace become dashes, so `(ns my.deep.ns)` gives
+`my-deep-ns-name`.
+
+From cljbang code, reach them with the namespace:
 
 ```clojure
 (my.config/greet "you")   ;; => "hello you"
@@ -89,11 +95,19 @@ From Clojure, reach them with the namespace:
 The `ns` is in effect only while the file loads, so it does not leak into
 whatever you evaluate next.
 
-The same munging works in reverse, which is how interop with elisp packages
-that use `--` reads naturally:
+The same munging works in reverse, which is what makes ns-qualified syntax
+the natural way to call an Emacs package:
 
 ```clojure
-(mylib/frob x)   ;; calls the elisp function mylib--frob
+(magit/status)            ;; calls magit-status
+(projectile/find-file)    ;; calls projectile-find-file
+```
+
+Internal names are not reachable this way on purpose. Use `el/` when you
+really want one:
+
+```clojure
+(el/magit--display-buffer buf)
 ```
 
 ## Interop

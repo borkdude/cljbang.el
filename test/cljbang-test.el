@@ -323,11 +323,26 @@
 ;;; Namespaces
 
 (ert-deftest cljbang-test-ns-interns-munged-names ()
-  "(ns foo) makes defn intern foo--name, callable from elisp."
+  "(ns foo) makes defn intern foo-name, callable from elisp."
   (cljbang-test--eval "(ns nstest) (defn triple [x] (* 3 x))")
-  (should (fboundp 'nstest--triple))
-  (should (= 9 (nstest--triple 3)))
+  (should (fboundp 'nstest-triple))
+  (should (= 9 (nstest-triple 3)))
   (setq cljbang--current-ns nil))
+
+(ert-deftest cljbang-test-defn-private-uses-double-dash ()
+  "Elisp spells internal names with two dashes, which is Clojure's defn-."
+  (cljbang-test--eval "(ns privtest) (defn pub [x] x) (defn- priv [x] x)")
+  (should (fboundp 'privtest-pub))
+  (should (fboundp 'privtest--priv))
+  (should-not (fboundp 'privtest--pub))
+  (should-not (fboundp 'privtest-priv))
+  (should (= 1 (cljbang-test--eval "(priv 1)")))
+  (setq cljbang--current-ns nil))
+
+(ert-deftest cljbang-test-qualified-reaches-public-elisp ()
+  "lib/thing must reach lib-thing, the public elisp API convention."
+  (should (eq 'magit-status (cljbang--qualified 'magit/status)))
+  (should (eq 'my-deep-ns-f (cljbang--qualified 'my.deep.ns/f))))
 
 (ert-deftest cljbang-test-ns-qualified-call ()
   (cljbang-test--eval "(ns nsq) (defn dbl [x] (* 2 x))")
@@ -364,8 +379,8 @@
     (setq-local cljbang-whole-buffer t)
     (insert "(ns buffns)\n(defn quad [x] (* 4 x))")
     (cljbang-eval-last-sexp)
-    (should (fboundp 'buffns--quad))
-    (should (= 12 (buffns--quad 3)))))
+    (should (fboundp 'buffns-quad))
+    (should (= 12 (buffns-quad 3)))))
 
 (provide 'cljbang-test)
 ;;; cljbang-test.el ends here
