@@ -125,6 +125,13 @@ my-config-answer          ;; => 7
 (my-config--shout "hey")  ;; => "HEY"
 ```
 
+From cljbang, reach them with the namespace. Dots become dashes, so
+`(ns my.deep.ns)` gives `my-deep-ns-name`:
+
+```clojure
+(my.config/greet "you")   ;; => "hello you"
+```
+
 They are ordinary elisp functions. Arity is checked, `interactive` makes
 a command, and `C-h f` shows the arglist and docstring.
 
@@ -141,11 +148,6 @@ Destructuring reads an alist, which is the shape Emacs passes around:
 A plist does not, because every list of keywords would look like one. A
 map that cljbang builds is a hash table, so elisp reading one back uses
 `gethash`.
-
-```clojure
-(my.config/greet "you")   ;; from cljbang, reach them with the namespace
-(ns my.deep.ns)           ;; dots become dashes: my-deep-ns-name
-```
 
 
 ### Require
