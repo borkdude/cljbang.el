@@ -285,6 +285,32 @@ arrives split.  Quoting has to be reapplied after the braces are rebuilt."
   (should-error (cljbang-test--eval "(set! (foo) 1)")))
 
 
+(ert-deftest cljbang-test-docstrings ()
+  "A Clojure docstring goes where elisp keeps one, so C-h f finds it."
+  (cljbang-test--eval "(defn dt-fn \"Doubles X.\" [x] (* x 2))")
+  (should (equal "Doubles X." (documentation 'dt-fn)))
+  (should (= 42 (dt-fn 21)))
+  (should (equal '(x) (help-function-arglist 'dt-fn)))
+  (cljbang-test--eval "(def dt-var \"The answer.\" 42)")
+  (should (equal "The answer." (get 'dt-var 'variable-documentation)))
+  (should (= 42 dt-var))
+  ;; and a string as the only body form is still a return value
+  (cljbang-test--eval "(defn dt-plain [x] \"just a string\")")
+  (should (equal "just a string" (dt-plain 1))))
+
+(ert-deftest cljbang-test-callable-from-elisp ()
+  "The promise: what a .clj file defines, elisp can call."
+  (cljbang-test--eval "(defn ce-plain [x] (* x 2))
+                       (defn ce-varargs [a & rest] (list a rest))
+                       (defn ce-destructured [{:keys [a]}] a)
+                       (defn ce-cmd [] (interactive) :ran)")
+  (should (= 42 (ce-plain 21)))
+  (should (equal '(1 (2 3)) (ce-varargs 1 2 3)))
+  (should (commandp 'ce-cmd))
+  (should-error (ce-plain 1 2))
+  ;; a map parameter wants a cljbang map, not an alist
+  (should (= 7 (ce-destructured (cljbang-hash-map :a 7)))))
+
 ;;; Macros
 
 (ert-deftest cljbang-test-defmacro ()

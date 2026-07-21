@@ -392,6 +392,12 @@ key is the pattern and the value is the map key to look up."
                          (when (cdr acc) '(& %&)))))
     (cljbang--compile-fn (vconcat params) (list body) env)))
 
+(defun cljbang--split-docstring (rest)
+  "Split REST of a defn into (DOC PARAMS BODY), doc being optional."
+  (if (stringp (car rest))
+      (list (car rest) (cadr rest) (cddr rest))
+    (list nil (car rest) (cdr rest))))
+
 (defun cljbang--compile-fn (params body env)
   (let ((arglist nil) (patterns nil) (env* env))
     ;; a destructuring param becomes a gensym in the arglist, unpacked by
@@ -562,13 +568,15 @@ magti/status without complaining about magit/status."
                    ,@(mapcar (lambda (ns) `(cljbang-require ,ns))
                              (delq nil (nreverse loaded)))))))
       ('def
-       (pcase-let* ((`(,name ,val) (cdr form))
+       (pcase-let* ((`(,name . ,rest) (cdr form))
+                    (doc (and (cdr rest) (stringp (car rest)) (pop rest)))
                     (name* (cljbang--ns-intern name)))
-         `(progn (defvar ,name* nil)
-                 (setq ,name* ,(cljbang-compile val env))
+         `(progn (defvar ,name* nil ,@(when doc (list doc)))
+                 (setq ,name* ,(cljbang-compile (car rest) env))
                  ',name*)))
       ('defmacro
-       (pcase-let* ((`(,name ,params . ,body) (cdr form))
+       (pcase-let* ((`(,name . ,rest) (cdr form))
+                    (`(,_doc ,params ,body) (cljbang--split-docstring rest))
                     (name* (cljbang--ns-intern name))
                     (fn (cljbang--compile-fn params body env)))
          ;; registered now, so the rest of this file can use it, and
@@ -578,10 +586,13 @@ magti/status without complaining about magit/status."
                                           ,cljbang--current-ns ,fn)
                  ',name*)))
       ((or 'defn 'defn-)
-       (pcase-let* ((`(,name ,params . ,body) (cdr form))
-                    (name* (cljbang--ns-intern name (eq (car form) 'defn-))))
-         `(progn (defalias ',name* ,(cljbang--compile-fn params body env))
-                 ',name*)))
+       (pcase-let* ((`(,name . ,rest) (cdr form))
+                    (`(,doc ,params ,body) (cljbang--split-docstring rest))
+                    (name* (cljbang--ns-intern name (eq (car form) 'defn-)))
+                    (fn (cljbang--compile-fn params body env)))
+         ;; a docstring goes where elisp keeps one, so C-h f finds it
+         (when doc (setq fn `(lambda ,(cadr fn) ,doc ,@(cddr fn))))
+         `(progn (defalias ',name* ,fn) ',name*)))
       ('fn
        (let ((rest (cdr form)))
          (when (symbolp (car rest)) (pop rest)) ; drop optional fn name

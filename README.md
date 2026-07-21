@@ -125,6 +125,11 @@ my-config-answer          ;; => 7
 (my-config--shout "hey")  ;; => "HEY"
 ```
 
+They are ordinary elisp functions: arity is checked, `interactive` makes
+a command, `C-h f` shows the arglist and the docstring. What crosses the
+boundary is Clojure-shaped, so a map parameter wants a cljbang map rather
+than an alist, and a map return value is a hash table.
+
 ```clojure
 (my.config/greet "you")   ;; from cljbang, reach them with the namespace
 (ns my.deep.ns)           ;; dots become dashes: my-deep-ns-name
