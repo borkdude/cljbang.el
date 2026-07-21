@@ -164,27 +164,24 @@ A file with no `ns` can require at the top level, and so can elisp:
 
 ### Calling a package
 
-`(magit/status)` works with no require, because `magit-status` is an
-autoload and calling it pulls magit in. Requiring the package up front
-would give that up.
+```clojure
+(org/agenda)       ;; works, org-agenda is an autoload
+el/org-directory   ;; void until org loads, variables do not autoload
+```
 
-Clj-kondo does not know that. Either require the package, which is the
-only thing that satisfies it on its own, or stay bare and add the
-packages you call to the same exclude list as `el`, below.
+`(require 'org)` costs about 55ms at config load. An autoload costs that
+only if you call in.
 
-Requiring is not wasteful in itself, since `require` does nothing the
-second time. It is that the load happens eagerly: `(require 'org)` costs
-about 55ms when your config loads, where an autoload spends it only if
-you ever call in.
+clj-kondo wants a require. To stay bare, add the packages you call to the
+same exclude list as `el`, below.
 
-Going bare means a typo is caught at compile time rather than by
-clj-kondo, since an autoload counts as defined:
+A typo is caught when compiling, since an autoload counts as defined:
 
 ```
 Warning (cljbang): magti/status resolves to magti-status, which is not defined
 ```
 
-Set `cljbang-warn-unresolved` to nil to turn that off.
+`cljbang-warn-unresolved` turns that off.
 
 ## Interop
 
