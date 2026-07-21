@@ -168,10 +168,14 @@ A file with no `ns` can require at the top level, and so can elisp:
 autoload and calling it pulls magit in. Requiring the package up front
 would give that up.
 
-clj-kondo does not know that. Either require the package, which is the
-only thing that satisfies it on its own but loads magit when the file
-loads, or stay bare and add the packages you call to the same exclude
-list as `el`, below.
+Clj-kondo does not know that. Either require the package, which is the
+only thing that satisfies it on its own, or stay bare and add the
+packages you call to the same exclude list as `el`, below.
+
+Requiring is not wasteful in itself, since `require` does nothing the
+second time. It is that the load happens eagerly: `(require 'org)` costs
+about 55ms when your config loads, where an autoload spends it only if
+you ever call in.
 
 Going bare means a typo is caught at compile time rather than by
 clj-kondo, since an autoload counts as defined:
@@ -218,8 +222,9 @@ Cljbang has these special forms:
 def defn defn- defmacro fn let set! if do ns require quote comment
 ```
 
-That is close to Clojure's own list. What Clojure defines as macros,
-cljbang does too.
+Clojure treats only `def`, `if`, `do`, `set!` and `quote` as special. The
+rest are macros there, and could become macros here too once there is a
+syntax quote to write them with.
 
 ### Macros
 
@@ -240,8 +245,6 @@ These ship as macros rather than compiler support:
 ```
 when cond -> ->> with-out-str time
 ```
-
-
 
 ### Functions
 
@@ -328,7 +331,7 @@ Not implemented (currently):
 
 ## Benchmarks
 
-Emacs 30.2, one machine, 1000 `defn`s. Reproduce with `bb bench-load`
+This is a casual benchmark done on my local machine with Emacs 30.2 and 1000 `defn`s. You can reproduce it with `bb bench-load`
 and `bb bench`.
 
 | loading | |
