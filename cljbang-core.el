@@ -13,6 +13,55 @@
 ;; string-join, if-let* and when-let* live here before Emacs 29
 (require 'subr-x)
 
+;;; Namespace state
+;;
+;; One table holds it all: :current names the namespace being compiled or
+;; loaded, and every namespace name keys the aliases and vars declared in
+;; it.  Aliases belong to a namespace, as they do in Clojure, so one file
+;; cannot see what another one required.  A compiled file sets the current
+;; namespace when it loads, so this lives here rather than in the compiler.
+
+(defvar cljbang--ns-state (make-hash-table :test #'equal)
+  "Namespace name -> its state, and :current -> the namespace in effect.")
+
+(defconst cljbang--no-ns :none
+  "Key for the state of code outside any namespace.")
+
+(defun cljbang--current-ns ()
+  "Name of the namespace in effect, or nil outside one."
+  (gethash :current cljbang--ns-state))
+
+(defun cljbang--set-current-ns (ns)
+  (puthash :current ns cljbang--ns-state))
+
+(defun cljbang--ns-entry (&optional ns)
+  "State of NS, the current namespace by default, created when missing."
+  (let ((key (or ns (cljbang--current-ns) cljbang--no-ns)))
+    (or (gethash key cljbang--ns-state)
+        (puthash key
+                 (list :aliases nil :vars (make-hash-table :test #'equal))
+                 cljbang--ns-state))))
+
+(defun cljbang--ns-aliases (&optional ns)
+  (plist-get (cljbang--ns-entry ns) :aliases))
+
+(defun cljbang--ns-add-alias (alias name)
+  "Record ALIAS for namespace NAME in the current namespace."
+  (let ((entry (cljbang--ns-entry)))
+    (setf (alist-get alias (plist-get entry :aliases)) name)))
+
+(defun cljbang--ns-var-table (&optional ns)
+  (plist-get (cljbang--ns-entry ns) :vars))
+
+(defmacro cljbang--with-ns (ns &rest body)
+  "Run BODY with NS as the current namespace, restoring it afterwards."
+  (declare (indent 1))
+  (let ((saved (gensym "cljbang-ns-")))
+    `(let ((,saved (cljbang--current-ns)))
+       (unwind-protect
+           (progn (cljbang--set-current-ns ,ns) ,@body)
+         (cljbang--set-current-ns ,saved)))))
+
 (defun cljbang-first (coll)
   (if (seq-empty-p coll) nil (seq-elt coll 0)))
 

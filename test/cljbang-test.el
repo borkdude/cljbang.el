@@ -63,7 +63,7 @@ arrives split.  Quoting has to be reapplied after the braces are rebuilt."
   "An ns attr-map, which is where a clj-kondo config goes, must not break."
   (should (cljbang-test--eval
            "(ns attrs {:clj-kondo/config '{:linters {:foo {:level :off}}}}) :ok"))
-  (setq cljbang--current-ns nil))
+  (cljbang--set-current-ns nil))
 
 (ert-deftest cljbang-test-get-reads-native-elisp-data ()
   "get, and so destructuring, reads alists and plists as well as maps."
@@ -287,7 +287,7 @@ keywords."
       (cljbang-eval-string "(ns selftest) (defn a [] 1)")
       (cljbang-compile '(selftest/a))
       (should-not warnings)))
-  (setq cljbang--current-ns nil))
+  (cljbang--set-current-ns nil))
 
 (ert-deftest cljbang-test-warning-can-be-turned-off ()
   (let (warnings)
@@ -353,7 +353,7 @@ keywords."
 
 (ert-deftest cljbang-test-defmacro-in-a-namespace ()
   (should (= 40 (cljbang-test--eval "(ns mns) (defmacro m1 [x] (list '* x 10)) (m1 4)")))
-  (setq cljbang--current-ns nil))
+  (cljbang--set-current-ns nil))
 
 (ert-deftest cljbang-test-defmacro-runaway-is-caught ()
   (should-error (cljbang-test--eval "(defmacro loopy [x] (list 'loopy x)) (loopy 1)")))
@@ -985,9 +985,70 @@ keywords."
 
 (ert-deftest cljbang-test-load-file-restores-ns ()
   "An (ns ...) inside a loaded file does not leak into the caller."
-  (let ((before cljbang--current-ns))
+  (let ((before (cljbang--current-ns)))
     (cljbang-load-file (cljbang-test--example "fast.clj"))
-    (should (equal before cljbang--current-ns))))
+    (should (equal before (cljbang--current-ns)))))
+
+(ert-deftest cljbang-test-aliases-belong-to-their-namespace ()
+  "An alias one file declares is not visible in another, as in Clojure."
+  (let ((dir (make-temp-file "cljbang-ns" t)))
+    (unwind-protect
+        (let ((lib (expand-file-name "lib" dir))
+              (cljbang-load-path (list dir)))
+          (make-directory lib)
+          (write-region "(ns lib.helper)\n(defn greet [x] (str \"hi \" x))\n"
+                        nil (expand-file-name "helper.clj" lib) nil 'quiet)
+          (write-region "(ns aliasa (:require [lib.helper :as h]))\n(defn use-it [] (h/greet \"a\"))\n"
+                        nil (expand-file-name "aliasa.clj" dir) nil 'quiet)
+          (write-region "(ns aliasb)\n(defn sneaky [] (h/greet \"b\"))\n"
+                        nil (expand-file-name "aliasb.clj" dir) nil 'quiet)
+          (cljbang-load-file (expand-file-name "aliasa.clj" dir))
+          (should (equal "hi a" (aliasa-use-it)))
+          (should (equal "lib.helper" (cdr (assq 'h (cljbang--ns-aliases "aliasa")))))
+          ;; b never required it, so h is not an alias there
+          (should (null (cljbang--ns-aliases "aliasb")))
+          (let ((cljbang-warn-unresolved nil))
+            (cljbang-load-file (expand-file-name "aliasb.clj" dir)))
+          (should-error (aliasb-sneaky)))
+      (delete-directory dir t)
+      (cljbang--set-current-ns nil))))
+
+(ert-deftest cljbang-test-a-cached-load-registers-its-aliases ()
+  "A warm load must leave the same aliases behind as a cold one."
+  (let ((dir (make-temp-file "cljbang-ns" t)))
+    (unwind-protect
+        (let ((lib (expand-file-name "lib" dir))
+              (cljbang-load-path (list dir)))
+          (make-directory lib)
+          (write-region "(ns lib.cached)\n(defn greet [x] (str \"hi \" x))\n"
+                        nil (expand-file-name "cached.clj" lib) nil 'quiet)
+          (write-region "(ns warmns (:require [lib.cached :as c]))\n(defn use-it [] (c/greet \"w\"))\n"
+                        nil (expand-file-name "warmns.clj" dir) nil 'quiet)
+          (cljbang-load-file (expand-file-name "warmns.clj" dir))
+          (should (equal "hi w" (warmns-use-it)))
+          ;; forget the aliases, then load again from the cache
+          (remhash "warmns" cljbang--ns-state)
+          (cljbang-load-file (expand-file-name "warmns.clj" dir))
+          (should (equal "lib.cached" (cdr (assq 'c (cljbang--ns-aliases "warmns"))))))
+      (delete-directory dir t)
+      (cljbang--set-current-ns nil))))
+
+(ert-deftest cljbang-test-vars-belong-to-their-namespace ()
+  (cljbang-test--eval "(ns nsone) (defn only-here [] :x)")
+  (cljbang-test--eval "(ns nstwo)")
+  (cljbang--set-current-ns "nsone")
+  (should (eq 'nsone-only-here (cljbang--ns-resolve 'only-here)))
+  (cljbang--set-current-ns "nstwo")
+  (should (null (cljbang--ns-resolve 'only-here)))
+  (cljbang--set-current-ns nil))
+
+(ert-deftest cljbang-test-ns-state-is-one-table ()
+  "The current namespace and the per-namespace state share one map."
+  (cljbang-test--eval "(ns nsthree) (defn thing [] :x)")
+  (should (equal "nsthree" (gethash :current cljbang--ns-state)))
+  (should (equal "nsthree" (cljbang--current-ns)))
+  (should (gethash "thing" (plist-get (gethash "nsthree" cljbang--ns-state) :vars)))
+  (cljbang--set-current-ns nil))
 
 ;;; Compiling a file to a cache
 
@@ -1007,7 +1068,7 @@ keywords."
           (should (cljbang-load-file f))
           (should (equal "hi you" (cachedconf-greet "you"))))
       (delete-directory dir t)
-      (setq cljbang--current-ns nil))))
+      (cljbang--set-current-ns nil))))
 
 (ert-deftest cljbang-test-cache-rebuilds-when-source-changes ()
   (let* ((dir (make-temp-file "cljbang-cache" t))
@@ -1045,10 +1106,10 @@ keywords."
           (remhash "dbl" cljbang--macros)
           (remhash "cachedmac/dbl" cljbang--macros)
           (load (cljbang--cache-file f) nil t)   ; only the cache
-          (setq cljbang--current-ns nil)
+          (cljbang--set-current-ns nil)
           (should (= 42 (cljbang-test--eval "(cachedmac/dbl 21)"))))
       (delete-directory dir t)
-      (setq cljbang--current-ns nil))))
+      (cljbang--set-current-ns nil))))
 
 
 (ert-deftest cljbang-test-clojure-string ()
@@ -1075,7 +1136,7 @@ keywords."
   (cljbang-test--eval "(ns nstest) (defn triple [x] (* 3 x))")
   (should (fboundp 'nstest-triple))
   (should (= 9 (nstest-triple 3)))
-  (setq cljbang--current-ns nil))
+  (cljbang--set-current-ns nil))
 
 (ert-deftest cljbang-test-defn-private-uses-double-dash ()
   "Elisp spells internal names with two dashes, which is Clojure's defn-."
@@ -1085,7 +1146,7 @@ keywords."
   (should-not (fboundp 'privtest--pub))
   (should-not (fboundp 'privtest-priv))
   (should (= 1 (cljbang-test--eval "(priv 1)")))
-  (setq cljbang--current-ns nil))
+  (cljbang--set-current-ns nil))
 
 (ert-deftest cljbang-test-qualified-reaches-public-elisp ()
   "lib/thing must reach lib-thing, the public elisp API convention."
@@ -1094,13 +1155,13 @@ keywords."
 
 (ert-deftest cljbang-test-ns-qualified-call ()
   (cljbang-test--eval "(ns nsq) (defn dbl [x] (* 2 x))")
-  (setq cljbang--current-ns nil)
+  (cljbang--set-current-ns nil)
   (should (= 8 (cljbang-test--eval "(nsq/dbl 4)"))))
 
 (ert-deftest cljbang-test-ns-alias ()
   (cljbang-test--eval "(ns aliased (:require [clojure.string :as str]))")
   (should (equal "a,b" (cljbang-test--eval "(str/join \",\" [\"a\" \"b\"])")))
-  (setq cljbang--current-ns nil))
+  (cljbang--set-current-ns nil))
 
 (ert-deftest cljbang-test-ns->file ()
   "Namespaces map to file names the way Clojure spells them."
@@ -1124,7 +1185,7 @@ otherwise be picked up by the next one."
     (cljbang-load-file (expand-file-name "app/a.clj" dir))
     (should (fboundp 'lib-b-hello))
     (should (equal "hello from b: a" (app-a-run))))
-  (setq cljbang--current-ns nil))
+  (cljbang--set-current-ns nil))
 
 (ert-deftest cljbang-test-cached-file-still-loads-its-requires ()
   "A require runs at compile time, so the cache has to carry it too."
@@ -1146,7 +1207,7 @@ otherwise be picked up by the next one."
           (should (fboundp 'lib-c-from-c))
           (should (eq :c (uses-run))))
       (delete-directory dir t)
-      (setq cljbang--current-ns nil))))
+      (cljbang--set-current-ns nil))))
 
 (ert-deftest cljbang-test-require-form-without-ns ()
   "(require '[lib :as l]) works in a file that has no ns form."
@@ -1154,7 +1215,7 @@ otherwise be picked up by the next one."
   (clrhash cljbang--loaded-ns)
   (let ((cljbang-load-path (list (expand-file-name "test/requires" cljbang-test--root))))
     (should (cljbang-test--eval "(require '[lib.b :as lb]) (lb/hello \"x\")")))
-  (setq cljbang--current-ns nil))
+  (cljbang--set-current-ns nil))
 
 (ert-deftest cljbang-test-cljbang-require-from-elisp ()
   (cljbang-test--clear-caches)
@@ -1162,39 +1223,39 @@ otherwise be picked up by the next one."
   (let ((cljbang-load-path (list (expand-file-name "test/requires" cljbang-test--root))))
     (should (equal "lib.b" (cljbang-require 'lib.b)))
     (should (fboundp 'lib-b-hello)))
-  (setq cljbang--current-ns nil))
+  (cljbang--set-current-ns nil))
 
 (ert-deftest cljbang-test-require-loads-elisp-feature ()
   (clrhash cljbang--loaded-ns)
   (cljbang-test--eval "(ns reqfeat (:require [subr-x :as sx]))")
   (should (featurep 'subr-x))
-  (setq cljbang--current-ns nil))
+  (cljbang--set-current-ns nil))
 
 (ert-deftest cljbang-test-require-allows-builtin-prefixes ()
   "Emacs built-ins have prefixes that name no feature, so string- is fine."
   (clrhash cljbang--loaded-ns)
   (should (cljbang-test--eval "(ns reqpfx (:require [string :as s])) :ok"))
   (should (equal "hi" (cljbang-test--eval "(s/trim \"  hi  \")")))
-  (setq cljbang--current-ns nil))
+  (cljbang--set-current-ns nil))
 
 (ert-deftest cljbang-test-require-rejects-typos ()
   "Nothing loadable and nothing defined under the prefix means a mistake."
   (clrhash cljbang--loaded-ns)
   (should-error (cljbang-test--eval "(ns reqmiss (:require [no-such-package-xyz :as n]))"))
-  (setq cljbang--current-ns nil))
+  (cljbang--set-current-ns nil))
 
 (ert-deftest cljbang-test-require-skips-builtin-namespaces ()
   "clojure.string is cljbang's own, not an elisp feature to load."
   (clrhash cljbang--loaded-ns)
   (should (equal "a,b" (cljbang-test--eval
                         "(ns reqstr (:require [clojure.string :as str])) (str/join \",\" [\"a\" \"b\"])")))
-  (setq cljbang--current-ns nil))
+  (cljbang--set-current-ns nil))
 
 (ert-deftest cljbang-test-as-alias-does-not-load ()
   (clrhash cljbang--loaded-ns)
   (cljbang-test--eval "(ns reqnoload (:require [lib.b :as-alias bb]))")
   (should-not (gethash "lib.b" cljbang--loaded-ns))
-  (setq cljbang--current-ns nil))
+  (cljbang--set-current-ns nil))
 
 (ert-deftest cljbang-test-require-cycle-terminates ()
   "cyc.a and cyc.b require each other, so the guard has to break the loop."
@@ -1205,13 +1266,13 @@ otherwise be picked up by the next one."
   ;; proves the cycle was actually traversed, not silently skipped
   (should (fboundp 'cyc-b-from-b))
   (should (fboundp 'cyc-a-from-a))
-  (setq cljbang--current-ns nil))
+  (cljbang--set-current-ns nil))
 
 (ert-deftest cljbang-test-as-alias-is-accepted ()
   "el/ resolves to the host whatever an alias claims."
   (cljbang-test--eval "(ns withalias (:require [cljbang.el :as-alias el]))")
   (should (equal "AB" (cljbang-test--eval "(el/upcase \"ab\")")))
-  (setq cljbang--current-ns nil))
+  (cljbang--set-current-ns nil))
 
 
 ;;; Interactive evaluation

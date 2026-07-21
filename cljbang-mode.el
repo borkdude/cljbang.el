@@ -72,14 +72,14 @@ to the form and in the echo area.
 Elsewhere falls back to `eval-last-sexp'."
   (interactive)
   (if (cljbang--clj-context-p)
-      (let* ((beg (save-excursion (backward-sexp) (point)))
-             ;; heed the nearest preceding (ns ...) form in the buffer
-             (cljbang--current-ns (or (cljbang--buffer-ns) cljbang--current-ns))
-             (val (cljbang-pr-str
-                   (cljbang-eval-string
-                    (buffer-substring-no-properties beg (point))))))
-        (cljbang--show-result val (point))
-        (message "=> %s" val))
+      ;; heed the nearest preceding (ns ...) form in the buffer
+      (cljbang--with-ns (or (cljbang--buffer-ns) (cljbang--current-ns))
+        (let* ((beg (save-excursion (backward-sexp) (point)))
+               (val (cljbang-pr-str
+                     (cljbang-eval-string
+                      (buffer-substring-no-properties beg (point))))))
+          (cljbang--show-result val (point))
+          (message "=> %s" val)))
     (call-interactively #'eval-last-sexp)))
 
 (defun cljbang--buffer-ns ()
@@ -95,16 +95,16 @@ Elsewhere falls back to `eval-last-sexp'."
   (let ((cands (copy-sequence cljbang--special-forms)))
     (dolist (c cljbang--core-fns)
       (push (symbol-name (car c)) cands))
-    (dolist (a (append cljbang--ns-alias-map cljbang--ns-aliases))
+    (dolist (a (append (cljbang--ns-aliases (cljbang--buffer-ns))
+                       cljbang--ns-default-aliases))
       (let ((prefix (concat (cdr a) "/")))
         (dolist (f cljbang--ns-fns)
           (when (string-prefix-p prefix (car f))
             (push (concat (symbol-name (car a)) "/"
                           (substring (car f) (length prefix)))
                   cands)))))
-    (when-let* ((ns (or (cljbang--buffer-ns) cljbang--current-ns))
-                (vars (gethash ns cljbang--ns-vars)))
-      (maphash (lambda (k _) (push k cands)) vars))
+    (when-let* ((ns (or (cljbang--buffer-ns) (cljbang--current-ns))))
+      (maphash (lambda (k _) (push k cands)) (cljbang--ns-var-table ns)))
     cands))
 
 (defun cljbang-completion-at-point ()
