@@ -1,6 +1,5 @@
 ;;; test-clj2el.el --- headless test for clj2el-core -*- lexical-binding: t; -*-
 
-(add-to-list 'load-path (expand-file-name "parseclj" (file-name-directory load-file-name)))
 (load (expand-file-name "clj2el-core.el" (file-name-directory load-file-name)) nil t)
 
 (defvar clj-src "

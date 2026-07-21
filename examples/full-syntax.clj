@@ -1,4 +1,4 @@
-;; uses map literals: routed through parseclj
+;; uses map literals
 (def scores {:alice 3 :bob 5})
 
 (defn winner [m]

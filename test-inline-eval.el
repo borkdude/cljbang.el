@@ -1,7 +1,6 @@
 ;;; test-inline-eval.el --- eval-inside-clj! context test -*- lexical-binding: t; -*-
 
 (add-to-list 'load-path (file-name-directory load-file-name))
-(add-to-list 'load-path (expand-file-name "parseclj" (file-name-directory load-file-name)))
 (require 'clj2el-core)
 
 (with-temp-buffer
@@ -14,7 +13,7 @@
   ;; Eval the inner call.
   (search-forward "(tri 10)")
   (clj2el-eval-last-sexp)
-  ;; Inline eval reads via parseclj, so map literals work interactively
+  ;; map literals work interactively
   ;; even though the elisp reader could never load them.
   (goto-char (point-max))
   (insert "(clj! (get {:a 41} :a))\n")

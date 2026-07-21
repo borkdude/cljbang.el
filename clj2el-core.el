@@ -1,11 +1,9 @@
 ;;; clj2el-core.el --- Clojure -> elisp forms, in-memory, no transpiled text -*- lexical-binding: t; -*-
 
-;; POC: read Clojure source with parseclj, convert the AST to elisp
-;; S-expression data, compile Clojure special forms to elisp forms, and
-;; eval them directly in the running Emacs.  No elisp source text is
-;; ever printed or re-read.
+;; POC: read Clojure source with the elisp reader, compile Clojure
+;; special forms to elisp forms, and eval them directly in the running
+;; Emacs.  No elisp source text is ever printed or re-read.
 
-(require 'parseclj)
 (require 'cl-lib)
 (require 'seq)
 
@@ -220,25 +218,6 @@ Clojure's subs treats it as out of range, so reject it."
                                    ns)))
               (or (cdr (assoc (concat full "/" n) clj2el--ns-fns))
                   (intern (concat (string-replace "." "-" full) "--" n)))))))))
-
-;;; Reader: parseclj AST -> elisp data
-
-;; Map literals become (clj2el--map-literal k v ...) so the compiler can
-;; tell them apart from call forms.
-
-(defun clj2el--ast->form (node)
-  (let ((type (alist-get :node-type node))
-        (children (alist-get :children node)))
-    (pcase type
-      (:root (mapcar #'clj2el--ast->form children))
-      (:list (mapcar #'clj2el--ast->form children))
-      (:vector (apply #'vector (mapcar #'clj2el--ast->form children)))
-      (:map (cons 'clj2el--map-literal (mapcar #'clj2el--ast->form children)))
-      (:set (cons 'clj2el--set-literal (mapcar #'clj2el--ast->form children)))
-      ((or :number :string :keyword :symbol :character :true)
-       (alist-get :value node))
-      ((or :nil :false) nil)
-      (_ (error "clj2el: unsupported node type %S" type)))))
 
 ;;; Compiler: Clojure form -> elisp form
 
@@ -493,9 +472,8 @@ key is the pattern and the value is the map key to look up."
 
 (defun clj2el-eval-string (s)
   "Read Clojure source S, compile each top-level form, eval in-process."
-  (let ((forms (clj2el--ast->form (parseclj-parse-clojure s)))
-        result)
-    (dolist (f forms result)
+  (let (result)
+    (dolist (f (clj2el--splice-braces (clj2el--read-all s)) result)
       (setq result (eval (clj2el-compile f) t)))))
 
 ;;; Embedded Clojure: elisp's reader already accepts most Clojure
@@ -506,8 +484,8 @@ key is the pattern and the value is the map key to look up."
 ;;; {...} needs no reader of its own.  Braces are symbol constituents to
 ;;; the elisp reader, so {:a 1} comes back as the symbols `{:a' and `1}'
 ;;; -- the delimiters survive, glued to their neighbours.  Splitting them
-;;; back off and reducing the result yields the same (clj2el--map-literal
-;;; k v ...) the parseclj path produces.
+;;; back off and reducing the result gives (clj2el--map-literal k v ...),
+;;; which the compiler tells apart from a call form.
 
 (defun clj2el--lex-braces (name)
   "Split symbol NAME into tokens, exposing { and } as separate symbols."
@@ -576,9 +554,7 @@ key is the pattern and the value is the map key to look up."
 
 (defun clj2el-load-file (file)
   "Load FILE of Clojure source, as if its contents were wrapped in `clj!'.
-When the source stays inside the elisp-readable subset it is read with
-the (fast, C) elisp reader; files using #(...), #{...} or #_ go
-through parseclj instead.  Returns the value of the last form."
+Returns the value of the last form."
   (interactive "fLoad Clojure file: ")
   (let ((src (with-temp-buffer
                (insert-file-contents file)
@@ -586,11 +562,7 @@ through parseclj instead.  Returns the value of the last form."
         ;; an (ns ...) in the file takes effect during the load only,
         ;; like Clojure's load-file preserving the caller's *ns*
         (clj2el--current-ns clj2el--current-ns))
-    (if (string-match-p "#[({_]" src)
-        (clj2el-eval-string src)
-      (let (result)
-        (dolist (f (clj2el--splice-braces (clj2el--read-all src)) result)
-          (setq result (eval (clj2el-compile f) t)))))))
+    (clj2el-eval-string src)))
 
 ;;; Editor integration: eval-last-sexp that respects clj! context
 
@@ -643,9 +615,9 @@ file, a clojure-mode buffer, or inside a (clj! ...) form."
 
 (defun clj2el-eval-last-sexp ()
   "Eval the sexp before point, honoring `clj!' context.
-Inside a `clj!' form the sexp text is read and evaluated as Clojure
-via parseclj -- full syntax, including {...} map literals.  The result
-is shown in an overlay next to the form and in the echo area.
+Inside a `clj!' form the sexp text is read and evaluated as Clojure,
+including {...} map literals.  The result is shown in an overlay next
+to the form and in the echo area.
 Elsewhere falls back to `eval-last-sexp'."
   (interactive)
   (if (clj2el--clj-context-p)

@@ -4,7 +4,6 @@
 ;; conflicts with (or mutates) files the user has open.
 
 (add-to-list 'load-path (file-name-directory load-file-name))
-(add-to-list 'load-path (expand-file-name "parseclj" (file-name-directory load-file-name)))
 (require 'clj2el-core)
 
 (defun test--overlay-text ()

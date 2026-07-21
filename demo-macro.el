@@ -6,7 +6,6 @@
 ;; Clojure too.
 
 (add-to-list 'load-path (file-name-directory (or load-file-name buffer-file-name)))
-(add-to-list 'load-path (expand-file-name "parseclj" (file-name-directory (or load-file-name buffer-file-name))))
 (require 'clj2el-core)
 
 (clj!

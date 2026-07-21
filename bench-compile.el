@@ -1,7 +1,6 @@
 ;;; bench-compile.el --- clj pipeline vs direct elisp, one large namespace -*- lexical-binding: t; -*-
 
 (add-to-list 'load-path (file-name-directory load-file-name))
-(add-to-list 'load-path (expand-file-name "parseclj" (file-name-directory load-file-name)))
 (require 'clj2el-core)
 
 (defmacro bench--ms (&rest body)
@@ -36,13 +35,13 @@
        (clj-src (bench--clj-src n))
        (macro-src (string-replace "defn cf" "defn mf" clj-src))
        (el-src (bench--el-src n))
-       ast forms compiled el-forms macro-forms expansion
-       ;; string pipeline: parseclj all the way
-       (t-parse (bench--ms (setq ast (parseclj-parse-clojure clj-src))))
-       (t-ast (bench--ms (setq forms (clj2el--ast->form ast))))
+       forms compiled el-forms macro-forms expansion
+       ;; string pipeline: source text in, values out
+       (t-parse (bench--ms
+                 (setq forms (clj2el--splice-braces (clj2el--read-all clj-src)))))
        (t-compile (bench--ms (setq compiled (mapcar #'clj2el-compile forms))))
        (t-eval (bench--ms (dolist (f compiled) (eval f t))))
-       ;; clj! macro path: elisp reader, no parseclj involved
+       ;; clj! macro path: forms already read by the elisp reader
        (t-m-read (bench--ms (setq macro-forms (bench--read-all macro-src))))
        (t-m-compile (bench--ms (setq expansion (macroexpand-1 (cons 'clj! macro-forms)))))
        (t-m-eval (bench--ms (eval expansion t)))
@@ -56,14 +55,13 @@
   (message "namespace of %d defns (%d KB clj / %d KB el source)"
            n (/ (length clj-src) 1024) (/ (length el-src) 1024))
   (message "")
-  (message "string pipeline (parseclj):")
-  (message "  parse             %8.2f ms" t-parse)
-  (message "  ast->form         %8.2f ms" t-ast)
+  (message "string pipeline:")
+  (message "  read              %8.2f ms" t-parse)
   (message "  compile           %8.2f ms" t-compile)
   (message "  eval              %8.2f ms" t-eval)
-  (message "  TOTAL             %8.2f ms" (+ t-parse t-ast t-compile t-eval))
+  (message "  TOTAL             %8.2f ms" (+ t-parse t-compile t-eval))
   (message "")
-  (message "clj! macro path (elisp reader):")
+  (message "clj! macro path:")
   (message "  read              %8.2f ms" t-m-read)
   (message "  compile           %8.2f ms" t-m-compile)
   (message "  eval              %8.2f ms" t-m-eval)

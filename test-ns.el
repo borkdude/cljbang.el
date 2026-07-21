@@ -1,7 +1,6 @@
 ;;; test-ns.el --- ns form + munged interning + ns-aware inline eval -*- lexical-binding: t; -*-
 
 (add-to-list 'load-path (file-name-directory load-file-name))
-(add-to-list 'load-path (expand-file-name "parseclj" (file-name-directory load-file-name)))
 (require 'clj2el-core)
 
 (let ((default-directory (file-name-directory load-file-name)))
