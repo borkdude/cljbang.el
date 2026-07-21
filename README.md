@@ -165,12 +165,14 @@ A file with no `ns` can require at the top level, and so can elisp:
 ### Calling a package
 
 ```clojure
-(org/agenda)       ;; works, org-agenda is an autoload
-el/org-directory   ;; void until org loads, variables do not autoload
-```
+(ns my.config
+  (:require [org :as-alias o]))  ;; alias, nothing loads
+                                 ;; :as would load org here, about 55ms
 
-`(require 'org)` costs about 55ms at config load. An autoload costs that
-only if you call in.
+(o/agenda)          ;; org loads on this call, not before
+(org/agenda)        ;; same, the alias is only shorthand
+el/org-directory    ;; void until org loads, variables do not autoload
+```
 
 clj-kondo wants a require. To stay bare, add the packages you call to the
 same exclude list as `el`, below.
