@@ -12,6 +12,11 @@ This project is heavily influenced by how I wrote [Squint](https://squint-cljs.g
 - Light-weight: the compiler step should be fast such that using Cljbang doesn't incur a lot of overhead compared to using elisp directly.
 - Performance first: compiled output should run fast, in the same ballpark as elisp
 
+My previous attempt at a similar project to bring Clojure to Elisp involved a
+transpiler. But I don't think using a transpiler in Emacs is user friendly for
+writing quick functions and scripts.  Instead this project is a lite compiler
+sitting in your elisp runtime and integrates tightly with it.
+
 ## Installation
 
 Requires Emacs 28.1 or later.
@@ -20,6 +25,17 @@ Requires Emacs 28.1 or later.
 (use-package cljbang
   :vc (:url "https://github.com/borkdude/cljbang"))
 ```
+
+Three files, so you can load only what you need:
+
+| | |
+|---|---|
+| `cljbang-core.el` | the runtime compiled code calls. Depends on nothing else |
+| `cljbang.el` | the compiler, `clj!` and `cljbang-load-file` |
+| `cljbang-mode.el` | inline evaluation, result overlays, completion |
+
+A byte-compiled file that uses `clj!` needs only `cljbang-core` at load
+time, because the macro is already expanded.
 
 ## Usage
 

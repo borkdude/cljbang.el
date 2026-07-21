@@ -1,0 +1,193 @@
+;;; cljbang-core.el --- Runtime for cljbang -*- lexical-binding: t; -*-
+
+;;; Commentary:
+
+;; The Clojure core that compiled cljbang code calls at run time.  A
+;; byte-compiled file needs this and not the compiler, so it is kept
+;; separate and requires nothing of cljbang.el.
+
+;;; Code:
+
+(require 'cl-lib)
+(require 'seq)
+
+(defun cljbang-first (coll)
+  (if (seq-empty-p coll) nil (seq-elt coll 0)))
+
+(defun cljbang-rest (coll)
+  (seq-into (seq-drop coll 1) 'list))
+
+(defun cljbang-second (coll)
+  (cljbang-first (cljbang-rest coll)))
+
+;; a set, map or keyword can be passed where a function is expected, as
+;; in (filter #{1 3} xs).  cljbang--fn resolves that once per call rather
+;; than once per element, so the ordinary case stays a bare funcall.
+
+(defun cljbang--fn (f)
+  "F as something funcall can take, wrapping a set, map or keyword."
+  (if (functionp f) f (lambda (&rest args) (apply #'cljbang--invoke f args))))
+
+(defun cljbang-map (f coll)
+  (mapcar (cljbang--fn f) (seq-into coll 'list)))
+
+(defun cljbang-filter (pred coll)
+  (seq-filter (cljbang--fn pred) (seq-into coll 'list)))
+
+(defun cljbang-reduce (f init coll)
+  (seq-reduce (cljbang--fn f) (seq-into coll 'list) init))
+
+(defun cljbang-count (coll)
+  (if (hash-table-p coll) (hash-table-count coll) (seq-length coll)))
+
+(defun cljbang-conj (coll x)
+  (cond ((vectorp coll) (vconcat coll (vector x)))
+        ((hash-table-p coll)
+         (let ((h (copy-hash-table coll))) (puthash x x h) h))
+        (t (cons x coll))))
+
+(defun cljbang-hash-map (&rest kvs)
+  (let ((h (make-hash-table :test #'equal)))
+    (while kvs (puthash (pop kvs) (pop kvs) h))
+    h))
+
+(defun cljbang-subs (s start &optional end)
+  "Substring of S from START to END.
+Elisp's substring counts a negative index from the end of the string;
+Clojure's subs treats it as out of range, so reject it."
+  (when (or (< start 0) (and end (< end 0)))
+    (error "String index out of range: %d" (if (< start 0) start end)))
+  (substring s start end))
+
+(defun cljbang-nth (coll i &rest not-found)
+  "Element I of COLL.  Out of range is an error unless NOT-FOUND is given."
+  (cond ((and coll (>= i 0) (< i (cljbang-count coll))) (seq-elt coll i))
+        (not-found (car not-found))
+        ((null coll) nil)
+        (t (error "Index out of bounds: %d" i))))
+
+(defun cljbang-name (x)
+  "Name of keyword, symbol or string X, without colon or namespace."
+  (cond ((stringp x) x)
+        ;; a keyword is a symbol here, so both lose the colon then the ns
+        ((symbolp x)
+         (let* ((s (symbol-name x))
+                (s (if (string-prefix-p ":" s) (substring s 1) s))
+                (i (string-search "/" s)))
+           (if i (substring s (1+ i)) s)))
+        (t (error "cljbang: cannot take name of %S" x))))
+
+(defun cljbang-hash-set (&rest xs)
+  "Set of XS, a hash table mapping each element to itself."
+  (let ((h (make-hash-table :test #'equal)))
+    (dolist (x xs h) (puthash x x h))))
+
+(defun cljbang-get (m k &optional default)
+  (cond ((hash-table-p m) (gethash k m default))
+        ((vectorp m) (if (< k (length m)) (aref m k) default))
+        (t default)))
+
+(defun cljbang--invoke (f &rest args)
+  "Call F as Clojure does.
+Sets, maps and vectors look their argument up.  A keyword looks itself
+up in its argument.  Checking functionp first keeps byte-code objects,
+which are vector-like, out of the lookup branches."
+  (cond ((functionp f) (apply f args))
+        ((or (hash-table-p f) (vectorp f)) (apply #'cljbang-get f args))
+        ((keywordp f) (apply #'cljbang-get (car args) f (cdr args)))
+        (t (apply f args))))
+
+(defun cljbang-contains? (coll k)
+  "Whether COLL has key K.  For a vector K is an index, as in Clojure."
+  (cond ((hash-table-p coll)
+         (not (eq 'cljbang--absent (gethash k coll 'cljbang--absent))))
+        ((vectorp coll) (and (integerp k) (>= k 0) (< k (length coll))))
+        (t nil)))
+
+(defun cljbang-assoc (m k v)
+  (let ((h (copy-hash-table m)))
+    (puthash k v h)
+    h))
+
+;; Elisp's equal compares hash tables by identity and keeps vectors and
+;; lists apart.  Clojure's = is structural, spans the sequential types,
+;; and takes any number of arguments.
+
+(defun cljbang--sequential-p (x)
+  "Whether X is one of Clojure's sequential collections.
+Strings are not, and nil is not, so (= [] nil) stays false as in Clojure."
+  (or (vectorp x) (and (consp x) (proper-list-p x))))
+
+(defun cljbang--equal (a b)
+  (cond
+   ((and (hash-table-p a) (hash-table-p b))
+    (and (= (hash-table-count a) (hash-table-count b))
+         (catch 'cljbang--unequal
+           (maphash (lambda (k v)
+                      (let ((bv (gethash k b 'cljbang--absent)))
+                        (when (or (eq bv 'cljbang--absent)
+                                  (not (cljbang--equal v bv)))
+                          (throw 'cljbang--unequal nil))))
+                    a)
+           t)))
+   ((or (hash-table-p a) (hash-table-p b)) nil)
+   ((and (cljbang--sequential-p a) (cljbang--sequential-p b))
+    (let ((la (append a nil))
+          (lb (append b nil)))
+      (and (= (length la) (length lb))
+           (cl-every #'cljbang--equal la lb))))
+   ((or (cljbang--sequential-p a) (cljbang--sequential-p b)) nil)
+   (t (equal a b))))
+
+(defun cljbang-= (a b &rest more)
+  "Whether A, B and MORE are equal, structurally, as in Clojure."
+  (and (cljbang--equal a b)
+       (or (null more)
+           (apply #'cljbang-= b more))))
+
+(defun cljbang--pr-str (x)
+  (cond ((null x) "nil")
+        ((eq x t) "true")
+        ((stringp x) x)
+        ((hash-table-p x)
+         (let (pairs)
+           (maphash (lambda (k v)
+                      (push (concat (cljbang--pr-str k) " " (cljbang--pr-str v)) pairs))
+                    x)
+           (concat "{" (string-join (nreverse pairs) ", ") "}")))
+        ((vectorp x)
+         (concat "[" (mapconcat #'cljbang--pr-str x " ") "]"))
+        ((proper-list-p x)
+         (concat "(" (mapconcat #'cljbang--pr-str x " ") ")"))
+        (t (format "%s" x))))
+
+(defun cljbang-str (&rest xs)
+  (mapconcat (lambda (x) (if (null x) "" (cljbang--pr-str x))) xs ""))
+
+(defun cljbang-println (&rest xs)
+  (princ (mapconcat #'cljbang--pr-str xs " "))
+  (princ "\n")
+  nil)
+
+(defun cljbang-not= (&rest args) (not (apply #'cljbang-= args)))
+
+(defun cljbang-string-join (sep-or-coll &optional coll)
+  (let ((sep (if coll sep-or-coll ""))
+        (xs (seq-into (or coll sep-or-coll) 'list)))
+    (mapconcat #'cljbang-str xs sep)))
+
+(defun cljbang-string-split (s re)
+  (apply #'vector (split-string s re)))
+
+(defun cljbang-string-replace (s match rep)
+  (replace-regexp-in-string (regexp-quote match) rep s))
+
+
+(defun cljbang--resolve (sym)
+  "Lisp-1 view over elisp's split namespaces: var first, then function."
+  (cond ((boundp sym) (symbol-value sym))
+        ((fboundp sym) (symbol-function sym))
+        (t (error "Unable to resolve symbol: %s" sym))))
+
+(provide 'cljbang-core)
+;;; cljbang-core.el ends here

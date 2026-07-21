@@ -4,6 +4,7 @@
 
 (require 'ert)
 (require 'cljbang)
+(require 'cljbang-mode)
 
 (defun cljbang-test--eval (src)
   "Evaluate Clojure SRC and return the value of the last form."
@@ -335,8 +336,8 @@
 
 (ert-deftest cljbang-test-load-file ()
   "Loading defines the file's vars, which stay callable afterwards."
-  (cljbang-load-file (cljbang-test--example "full-syntax.clj"))
-  (should (eq :bob (cljbang-test--eval "(winner scores)")))
+  (cljbang-load-file (cljbang-test--example "literals.clj"))
+  (should (eq :bob (cljbang-test--eval "(literals/winner literals/scores)")))
   (cljbang-load-file (cljbang-test--example "fast.clj"))
   (should (= 55 (cljbang-test--eval "(fast/fib 10)"))))
 
@@ -389,7 +390,7 @@
   "A :require pulls in the .clj file it names, without loading it first."
   (clrhash cljbang--loaded-ns)
   (let ((dir (expand-file-name "test/requires/" cljbang-test--root)))
-    (cljbang-load-file (expand-file-name "app_a.clj" dir))
+    (cljbang-load-file (expand-file-name "app/a.clj" dir))
     (should (fboundp 'lib-b-hello))
     (should (equal "hello from b: a" (app-a-run))))
   (setq cljbang--current-ns nil))
