@@ -532,6 +532,26 @@ cannot take it."
       (should (string-match-p "already coll-a-b/c" (car warnings)))))
   (cljbang--set-current-ns nil))
 
+(ert-deftest cljbang-test-a-var-of-the-namespace-beats-a-core-function ()
+  "A defn named like a core function is what that name means there."
+  (cljbang-test--eval "(ns shadowcore) (defn map [c] :mine)")
+  (should (eq :mine (cljbang-test--eval "(map [1 2])")))
+  (should (eq 'shadowcore-map (cljbang--resolve-name 'map)))
+  (cljbang--set-current-ns nil)
+  (should (equal '(2 3) (cljbang-test--eval "(map inc [1 2])"))))
+
+(ert-deftest cljbang-test-resolve-name ()
+  "Clojure's resolve, over elisp's flat symbols."
+  (cljbang-test--eval "(ns resolvens) (defn thing [] :x)")
+  (should (eq 'resolvens-thing (cljbang--resolve-name 'thing)))
+  (should (eq 'cljbang-string-join (cljbang--resolve-name 'str/join)))
+  (should (eq 'point (cljbang--resolve-name 'el/point)))
+  (should (eq '1+ (cljbang--resolve-name 'inc)))
+  ;; a special form and an unknown name resolve to nothing, as in Clojure
+  (should (null (cljbang--resolve-name 'if)))
+  (should (null (cljbang--resolve-name 'no-such-name-anywhere)))
+  (cljbang--set-current-ns nil))
+
 (ert-deftest cljbang-test-what-a-symbol-was-interned-as ()
   (cljbang-test--eval "(ns internedns) (defn thing [] :x)")
   (should (equal '("internedns" . "thing") (cljbang--interned-as 'internedns-thing)))

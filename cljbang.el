@@ -794,19 +794,27 @@ Returns a list of forms, looping when a recur asks for it."
         ((cljbang--qualified sym))
         (t sym)))
 
+(defun cljbang--resolve-name (sym)
+  "The elisp symbol SYM names, or nil when nothing here names one.
+Clojure's resolve, over elisp's flat symbols: el/ gives a host name, a
+qualified one goes through the aliases, and a bare one is a var of the
+current namespace or a core function.  A special form resolves to
+nothing, as it does in Clojure, and so does a name cljbang never saw."
+  (or (cljbang--el-symbol sym)
+      (cljbang--qualified sym)
+      (cljbang--ns-resolve sym)
+      (alist-get sym cljbang--core-fns)))
+
 (defun cljbang--compile-symbol (form env)
   "Compile FORM in value position."
   (cond ((memq form env) form)
-        ;; el/ names a var as readily as a function, so resolve it the
-        ;; lisp-1 way rather than assuming #'
-        ((cljbang--el-symbol form)
-         `(cljbang--resolve ',(cljbang--el-symbol form)))
-        ;; a qualified name may be a def as readily as a defn, so resolve
-        ;; it the lisp-1 way rather than assuming #'
-        ((cljbang--qualified form)
-         `(cljbang--resolve ',(cljbang--qualified form)))
-        ((cljbang--ns-resolve form)
-         `(cljbang--resolve ',(cljbang--ns-resolve form)))
+        ;; a name may be a def as readily as a defn, so resolve it the
+        ;; lisp-1 way rather than assuming #', which a core function can
+        ;; take since it is always a function
+        ((or (cljbang--el-symbol form)
+             (cljbang--qualified form)
+             (cljbang--ns-resolve form))
+         `(cljbang--resolve ',(cljbang--resolve-name form)))
         ((alist-get form cljbang--core-fns)
          `#',(alist-get form cljbang--core-fns))
         (t `(cljbang--resolve ',form))))
