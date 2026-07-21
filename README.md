@@ -112,15 +112,12 @@ my-config-answer          ;; => 7
 (ns my.deep.ns)           ;; dots become dashes: my-deep-ns-name
 ```
 
-The `ns` is in effect only while the file loads, so it does not leak into
-whatever you evaluate next.
 
 ### Require
 
 A `:require` loads a `.clj` file if it finds one, relative to the
 requiring file and then along `cljbang-load-path`, and otherwise loads an
-elisp feature of that name. Namespaces map to file names as in Clojure,
-so `lib.some-thing` is `lib/some_thing.clj`.
+elisp feature of that name. `lib.some-thing` is `lib/some_thing.clj`.
 
 ```clojure
 (ns app.a (:require [lib.b :as b]))
@@ -148,7 +145,6 @@ A file with no `ns` can require at the top level, and so can elisp:
 (el/magit--display-buffer buf)  ;; internal names need el/
 ```
 
-A require happens once, so cycles terminate.
 
 ### Calling a package
 
@@ -216,8 +212,6 @@ using `list` and `cons`:
 (unless-neg 5 :ok)                         ;; => :ok
 ```
 
-A macro is registered while compiling, so a form further down the same
-file can use it. A `let` binding of the same name shadows it.
 
 
 ### Functions
