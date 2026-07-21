@@ -171,17 +171,6 @@ Strings are not, and nil is not, so (= [] nil) stays false as in Clojure."
 
 (defun cljbang-not= (&rest args) (not (apply #'cljbang-= args)))
 
-(defun cljbang-string-join (sep-or-coll &optional coll)
-  (let ((sep (if coll sep-or-coll ""))
-        (xs (seq-into (or coll sep-or-coll) 'list)))
-    (mapconcat #'cljbang-str xs sep)))
-
-(defun cljbang-string-split (s re)
-  (apply #'vector (split-string s re)))
-
-(defun cljbang-string-replace (s match rep)
-  (replace-regexp-in-string (regexp-quote match) rep s))
-
 
 (defun cljbang--resolve (sym)
   "Lisp-1 view over elisp's split namespaces: var first, then function."

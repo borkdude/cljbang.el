@@ -24,6 +24,7 @@
 (require 'cl-lib)
 (require 'seq)
 (require 'cljbang-core)
+(require 'cljbang-string)
 
 ;;; Clojure name -> elisp function mapping
 
@@ -168,16 +169,6 @@ PRIVATE gives the double dash elisp uses for internal names."
   (when-let* ((ns cljbang--current-ns)
               (vars (gethash ns cljbang--ns-vars)))
     (gethash (symbol-name sym) vars)))
-
-(defconst cljbang--ns-fns
-  '(("clojure.string/join" . cljbang-string-join)
-    ("clojure.string/split" . cljbang-string-split)
-    ("clojure.string/replace" . cljbang-string-replace)
-    ("clojure.string/upper-case" . upcase)
-    ("clojure.string/lower-case" . downcase)
-    ("clojure.string/capitalize" . capitalize)
-    ("clojure.string/trim" . string-trim)
-    ("clojure.string/blank?" . string-blank-p)))
 
 ;; el/ is the host environment, the way js/ is in ClojureScript: the name
 ;; after it is an elisp symbol taken verbatim.  It escapes ns munging

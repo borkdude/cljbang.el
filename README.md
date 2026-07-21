@@ -32,6 +32,7 @@ Three files, so you can load only what you need:
 | | |
 |---|---|
 | `cljbang-core.el` | the runtime compiled code calls. Depends on nothing else |
+| `cljbang-string.el` | `clojure.string`, aliased to `str` |
 | `cljbang.el` | the compiler, `clj!` and `cljbang-load-file` |
 | `cljbang-mode.el` | inline evaluation, result overlays, completion |
 
