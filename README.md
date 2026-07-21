@@ -340,7 +340,7 @@ Not implemented:
 
 - Syntax quote. Macros must build expansions with `list` and `cons`.
 - `:strs`, `:syms` and namespaced `:keys` destructuring.
-- The `:while` modifier in `doseq`, which `:let` and `:when` do support.
+- The `:while` modifier in `doseq`.
 - Protocols and multimethods.
 
 ## Benchmarks
