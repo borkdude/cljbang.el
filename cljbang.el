@@ -47,7 +47,9 @@
     (conj . cljbang-conj) (hash-map . cljbang-hash-map)
     (hash-set . cljbang-hash-set) (contains? . cljbang-contains?)
     (assoc . cljbang-assoc)
-    (subs . cljbang-subs)
+    (subs . cljbang-subs) (throw . cljbang-throw)
+    (ex-info . cljbang-ex-info) (ex-message . cljbang-ex-message)
+    (ex-data . cljbang-ex-data) (ex-cause . cljbang-ex-cause)
     (re-pattern . cljbang-re-pattern) (re-find . cljbang-re-find)
     (re-matches . cljbang-re-matches) (re-seq . cljbang-re-seq)
     (load-file . cljbang-load-file)))
@@ -264,7 +266,7 @@ names a namespace without loading it as in Clojure."
 ;; cljbang itself.
 (defconst cljbang--special-forms
   '("def" "defn" "defn-" "defmacro" "fn" "let" "set!" "if" "do"
-    "ns" "require" "quote" "comment")
+    "try" "ns" "require" "quote" "comment")
   "Names `cljbang-compile' handles itself.")
 
 (defun cljbang--compile-body (forms env)
@@ -428,6 +430,49 @@ key is the pattern and the value is the map key to look up."
                   (push b pairs)
                   (push (car b) env*)))
     `(let* ,(nreverse pairs) ,@(cljbang--compile-body body env*))))
+
+;; condition-case takes its handlers as clauses rather than expressions, so
+;; try is compiled rather than expanded.  Clojure has it as a special form
+;; too.  One gensym holds the error for every handler, since condition-case
+;; binds a single variable.
+(defun cljbang--catch-symbol (sym)
+  "Elisp error symbol for the SYM a catch clause names."
+  (cond ((eq sym :default) t)
+        ((memq sym '(Exception Throwable Error))
+         (error "cljbang: catch takes an elisp error symbol, not %s" sym))
+        ((symbolp sym) sym)
+        (t (error "cljbang: catch needs an error symbol, got %S" sym))))
+
+(defun cljbang--compile-try (forms env)
+  "Compile the FORMS of a try: a body, then catch and finally clauses."
+  (let (body handlers finally)
+    (dolist (form forms)
+      (pcase form
+        (`(catch ,sym ,var . ,handler)
+         (push (list (cljbang--catch-symbol sym) var handler) handlers))
+        (`(finally . ,cleanup)
+         (setq finally cleanup))
+        ((or `(catch . ,_) `(finally . ,_))
+         (error "cljbang: malformed clause %S" form))
+        (_ (when (or handlers finally)
+             (error "cljbang: try body must come before catch and finally"))
+           (push form body))))
+    (let* ((err (gensym "cljbang-err-"))
+           (compiled `(progn ,@(cljbang--compile-body (nreverse body) env)))
+           (caught
+            (if (null handlers)
+                compiled
+              `(condition-case ,err
+                   ,compiled
+                 ,@(mapcar
+                    (lambda (h)
+                      (pcase-let ((`(,sym ,var ,handler) h))
+                        `(,sym (let ((,var (cljbang--caught ,err)))
+                                 ,@(cljbang--compile-body handler (cons var env))))))
+                    (nreverse handlers))))))
+      (if finally
+          `(unwind-protect ,caught ,@(cljbang--compile-body finally env))
+        caught))))
 
 (defun cljbang--thread (init forms first?)
   "Expand -> (FIRST? t) or ->> threading."
@@ -603,6 +648,7 @@ magti/status without complaining about magit/status."
        `(setq ,(cljbang--assign-target (cadr form) env)
               ,(cljbang-compile (caddr form) env)))
       ('let (cljbang--compile-let (cadr form) (cddr form) env))
+      ('try (cljbang--compile-try (cdr form) env))
       ('if `(if ,@(cljbang--compile-body (cdr form) env)))
       ('do `(progn ,@(cljbang--compile-body (cdr form) env)))
       (_ (cljbang--compile-call form env))))))

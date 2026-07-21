@@ -72,6 +72,38 @@
          (let ((h (copy-hash-table coll))) (puthash x x h) h))
         (t (cons x coll))))
 
+;; Clojure throws a value and catches that same value back.  Elisp signals
+;; an error symbol with data, so a thrown value rides along as the data of
+;; cljbang-error, and catch unwraps it.  A native elisp error is bound as
+;; it comes, the way a Clojure catch of an NPE binds an NPE.
+
+(define-error 'cljbang-error "cljbang throw")
+
+(defun cljbang-throw (x)
+  (signal 'cljbang-error (list x)))
+
+(defun cljbang--caught (err)
+  "What a catch clause binds for elisp error ERR."
+  (if (eq (car-safe err) 'cljbang-error) (cadr err) err))
+
+(defun cljbang-ex-info (msg data &optional cause)
+  (record 'cljbang-ex-info msg data cause))
+
+(defun cljbang--ex-info-p (x)
+  (and (recordp x) (eq (aref x 0) 'cljbang-ex-info)))
+
+(defun cljbang-ex-message (e)
+  "Message of E, an ex-info or an elisp error, else nil as in Clojure."
+  (cond ((cljbang--ex-info-p e) (aref e 1))
+        ((and (consp e) (symbolp (car e))) (error-message-string e))))
+
+(defun cljbang-ex-data (e)
+  "Data of E when it is an ex-info, else nil as in Clojure."
+  (when (cljbang--ex-info-p e) (aref e 2)))
+
+(defun cljbang-ex-cause (e)
+  (when (cljbang--ex-info-p e) (aref e 3)))
+
 (defun cljbang-re-pattern (pattern)
   "A regex over PATTERN.  The syntax is elisp's, not Java's, as the host wins."
   (record 'cljbang-regex pattern))

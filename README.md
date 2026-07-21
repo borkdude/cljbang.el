@@ -222,10 +222,10 @@ called through `:as-alias`. Disable those warnings in
 Cljbang has these special forms:
 
 ```
-def defn defn- defmacro fn let set! if do ns require quote comment
+def defn defn- defmacro fn let set! if do try ns require quote comment
 ```
 
-Clojure treats only `def`, `if`, `do`, `set!` and `quote` as special. The
+Clojure treats only `def`, `if`, `do`, `set!`, `quote` and `try` as special. The
 rest are macros there, and could become macros here too once there is a
 syntax quote to write them with.
 
@@ -258,7 +258,7 @@ Supported functions:
 first second rest last nth count get contains? conj assoc
 map filter remove reduce concat sort str pr-str println prn name subs
 re-pattern re-find re-matches re-seq
-hash-map hash-set load-file
+hash-map hash-set throw ex-info ex-message ex-data ex-cause load-file
 ```
 
 `clojure.string` is available as `str` without a `require`:
@@ -321,6 +321,9 @@ Lisp semantics:
 
 #"\\(a\\|b\\)"       ;; elisp regex syntax, where Clojure writes #"(a|b)"
 (assoc m :k 1)      ;; copies the map, so O(n)
+
+(try (el/car 1)                        ;; catch takes an elisp error symbol,
+  (catch wrong-type-argument e e))     ;;    where Clojure writes Exception
 
 (get '((:a . 1)) :a)   ;; => 1, an alist reads as a map
 (get '((1 2) (3 4)) 1) ;; => (2), and so does a list of lists. Clojure

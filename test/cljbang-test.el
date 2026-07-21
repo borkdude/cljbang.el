@@ -479,6 +479,70 @@ keywords."
   (should (= 6 (cljbang-test--eval "(let [n 0] (doseq [x [1 2 3]] (set! n (+ n x))) n)")))
   (should (= 3 (cljbang-test--eval "(let [n 0] (dotimes [i 3] (set! n (inc n))) n)"))))
 
+(ert-deftest cljbang-test-try-catch ()
+  (should (= 1 (cljbang-test--eval "(try 1)")))
+  (should (= 1 (cljbang-test--eval "(try 1 (catch error e :n))")))
+  (should (= 5 (cljbang-test--eval "(try (throw 5) (catch error e e))")))
+  (should (eq :x (cljbang-test--eval "(try (throw :x) (catch :default e e))"))))
+
+(ert-deftest cljbang-test-throw-carries-any-value ()
+  "Clojure catches back what was thrown, so a map arrives as a map."
+  (should (= 1 (cljbang-test--eval "(try (throw {:a 1}) (catch error e (get e :a)))")))
+  (should (equal "s" (cljbang-test--eval "(try (throw \"s\") (catch error e e))"))))
+
+(ert-deftest cljbang-test-catch-binds-elisp-errors-as-they-come ()
+  (should (equal "boom" (cljbang-test--eval
+                         "(try (el/error \"boom\") (catch error e (el/error-message-string e)))")))
+  (should (eq :wta (cljbang-test--eval "(try (el/car 1) (catch wrong-type-argument e :wta))"))))
+
+(ert-deftest cljbang-test-catch-picks-the-matching-clause ()
+  (should (eq :err (cljbang-test--eval
+                    "(try (el/car 1) (catch arith-error e :ae) (catch error e :err))")))
+  (should-error (cljbang-test--eval
+                 "(try (el/signal 'arith-error nil) (catch wrong-type-argument e :no))")))
+
+(ert-deftest cljbang-test-finally ()
+  (should (equal ":c\n:f\n"
+                 (cljbang-test--eval
+                  "(with-out-str (try (throw 1) (catch error e (println :c)) (finally (println :f))))")))
+  (should (= 1 (cljbang-test--eval "(try 1 (finally 99))")))
+  (should (equal ":f\n" (cljbang-test--eval
+                         "(with-out-str (try 1 (finally (println :f))))"))))
+
+(ert-deftest cljbang-test-finally-runs-before-the-error-propagates ()
+  (should (equal ":f\n"
+                 (cljbang-test--eval
+                  "(with-out-str (try (try (throw 1) (finally (println :f)))
+                                      (catch error e nil)))"))))
+
+(ert-deftest cljbang-test-ex-info ()
+  (should (equal "boom" (cljbang-test--eval
+                         "(try (throw (ex-info \"boom\" {:a 1})) (catch error e (ex-message e)))")))
+  (should (= 1 (cljbang-test--eval
+                "(try (throw (ex-info \"boom\" {:a 1})) (catch error e (get (ex-data e) :a)))")))
+  (should (equal "inner"
+                 (cljbang-test--eval
+                  "(try (throw (ex-info \"m\" {} (ex-info \"inner\" {})))
+                     (catch error e (ex-message (ex-cause e))))"))))
+
+(ert-deftest cljbang-test-ex-message-reads-elisp-errors ()
+  (should (equal "native" (cljbang-test--eval
+                           "(try (el/error \"native\") (catch error e (ex-message e)))")))
+  (should (null (cljbang-test--eval "(try (el/error \"native\") (catch error e (ex-data e)))"))))
+
+(ert-deftest cljbang-test-ex-accessors-return-nil-off-an-ex-info ()
+  "As in Clojure, where ex-data of anything but an ex-info is nil."
+  (should (null (cljbang-test--eval "(ex-data {:a 1})")))
+  (should (null (cljbang-test--eval "(ex-message \"s\")")))
+  (should (null (cljbang-test--eval "(ex-cause (ex-info \"m\" {}))")))
+  (should (null (cljbang-test--eval "(try (throw 5) (catch error e (ex-message e)))"))))
+
+(ert-deftest cljbang-test-try-rejects-jvm-class-names ()
+  "Exception would compile but never match, since matching goes by error symbol."
+  (should-error (cljbang-test--eval "(try (throw 5) (catch Exception e e))"))
+  (should-error (cljbang-test--eval "(try (throw 5) (catch error))"))
+  (should-error (cljbang-test--eval "(try (throw 1) (catch error e e) (println :after))")))
+
 (ert-deftest cljbang-test-if-when-do ()
   (should (eq :y (cljbang-test--eval "(if true :y :n)")))
   (should (null (cljbang-test--eval "(when false :y)")))
