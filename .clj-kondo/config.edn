@@ -1,4 +1,6 @@
 ;; el/ is cljbang's host environment, the way js/ is in ClojureScript:
-;; el/emacs-version means the elisp function emacs-version.  There is no
-;; such Clojure namespace, so exempt it from the unresolved check.
-{:linters {:unresolved-namespace {:exclude [el]}}}
+;; el/emacs-version means the elisp function emacs-version.  And a package
+;; reached through :as-alias is never loaded, which clj-kondo is right
+;; about for Clojure and wrong about here, since Emacs autoloads it.
+{:linters {:unresolved-namespace {:exclude [el]}
+           :aliased-namespace-var-usage {:level :off}}}

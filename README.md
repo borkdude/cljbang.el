@@ -132,50 +132,29 @@ my-config-answer          ;; => 7
 ### Require
 
 A `:require` loads a `.clj` file if it finds one, relative to the
-requiring file and then along `cljbang-load-path`, and otherwise loads an
-elisp feature of that name. `lib.some-thing` is `lib/some_thing.clj`.
-
-```clojure
-(ns app.a (:require [lib.b :as b]))
-(defn run [] (b/hello "a"))
-```
-
-A file with no `ns` can require at the top level, and so can elisp:
-
-```clojure
-(require '[lib.b :as b])
-```
-
-```emacs-lisp
-(cljbang-require 'lib.b)
-```
+requiring file and then along `cljbang-load-path`, and otherwise an elisp
+feature of that name. `lib.some-thing` is `lib/some_thing.clj`.
 
 ```clojure
 (ns my.config
   (:require [lib.b :as b]          ;; loads lib/b.clj
-            [magit :as m]          ;; loads the elisp feature
+            [magit :as m]          ;; loads magit now, about 55ms
             [string :as s]         ;; a built-in prefix, nothing to load
-            [org :as-alias o]))    ;; alias only, org autoloads when called
+            [org :as-alias o]))    ;; alias only, org loads when called
 
-(magit/status)                  ;; qualified names work the same way
-(el/magit--display-buffer buf)  ;; internal names need el/
+(b/hello "a")
+(o/agenda)                       ;; org loads on this call, not before
+(el/magit--display-buffer buf)   ;; internal names need el/
+el/org-directory                 ;; void until org loads, variables do not autoload
 ```
-
-
-### Calling a package
 
 ```clojure
-(ns my.config
-  (:require [org :as-alias o]))  ;; alias, nothing loads
-                                 ;; :as would load org here, about 55ms
-
-(o/agenda)          ;; org loads on this call, not before
-(org/agenda)        ;; same, the alias is only shorthand
-el/org-directory    ;; void until org loads, variables do not autoload
+(require '[lib.b :as b])   ;; in a file with no ns form
 ```
 
-clj-kondo wants a require. To stay bare, add the packages you call to the
-same exclude list as `el`, below.
+```emacs-lisp
+(cljbang-require 'lib.b)   ;; from elisp
+```
 
 A typo is caught when compiling, since an autoload counts as defined:
 
@@ -204,11 +183,13 @@ el/tab-width                            ; a variable, not a function
 (set! el/my/some-var 42)                ; slash preserved
 ```
 
-There is no Clojure namespace called `el`, so clj-kondo reports every use
-of it as unresolved. Tell it otherwise in your own `.clj-kondo/config.edn`:
+`el` is not a Clojure namespace, and a package reached through
+`:as-alias` is never loaded as far as clj-kondo is concerned. Both are
+fine here, so in your own `.clj-kondo/config.edn`:
 
 ```clojure
-{:linters {:unresolved-namespace {:exclude [el]}}}
+{:linters {:unresolved-namespace {:exclude [el]}
+           :aliased-namespace-var-usage {:level :off}}}
 ```
 
 ## Clojure API

@@ -47,6 +47,24 @@
   (should (equal '(("a" . 1)) (cljbang-test--eval "(get {:al '((\"a\" . 1))} :al)"))))
 
 
+(ert-deftest cljbang-test-quoted-collection-literals ()
+  "The reader binds quote to the symbol holding the open brace, so '{:a 1}
+arrives split.  Quoting has to be reapplied after the braces are rebuilt."
+  (should (= 1 (cljbang-test--eval "(count '{:a 1})")))
+  (should (= 2 (cljbang-test--eval "(count '#{1 2})")))
+  ;; contents stay unevaluated, as in Clojure
+  (should (eq 'foo (cljbang-test--eval "(get '{:a foo} :a)")))
+  (should (equal [1 x] (cljbang-test--eval "(get '{:a [1 x]} :a)")))
+  ;; a nested literal is still a collection, not a quoted list
+  (should (= 1 (cljbang-test--eval "(count (get '{:a {:b c}} :a))")))
+  (should (eq 'c (cljbang-test--eval "(get (get '{:a {:b c}} :a) :b)"))))
+
+(ert-deftest cljbang-test-ns-attr-map ()
+  "An ns attr-map, which is where a clj-kondo config goes, must not break."
+  (should (cljbang-test--eval
+           "(ns attrs {:clj-kondo/config '{:linters {:foo {:level :off}}}}) :ok"))
+  (setq cljbang--current-ns nil))
+
 ;;; Set literals
 
 (ert-deftest cljbang-test-set-empty ()

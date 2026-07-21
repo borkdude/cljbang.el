@@ -679,6 +679,9 @@ it applies to files and inline evaluation but not to `clj!'."
       (push (car (read-from-string (substring name start))) tokens))
     (nreverse tokens)))
 
+(defconst cljbang--quote-marker 'cljbang--quote
+  "Stands in for a quote whose form the reader broke across brace tokens.")
+
 (defun cljbang--brace-tokens (form)
   "Expand FORM into the token(s) it contributes to a brace scan."
   (cond
@@ -686,9 +689,24 @@ it applies to files and inline evaluation but not to `clj!'."
    ;; unquote: (\, x) puts x back in the stream
    ((and (consp form) (eq (car form) '\,) (= (length form) 2))
     (cljbang--brace-tokens (cadr form)))
+   ;; '{:a 1} reads as the quoted symbol `{:a' followed by `1}', so the
+   ;; quote has swallowed the opening brace.  Put it back as a marker and
+   ;; let the scan below decide what it applies to.
+   ((and (consp form) (eq (car form) 'quote) (= (length form) 2)
+         (cljbang--needs-splice-p (cadr form)))
+    (cons cljbang--quote-marker (cljbang--brace-tokens (cadr form))))
    ((and form (symbolp form) (string-match-p "[{}]" (symbol-name form)))
     (cljbang--lex-braces (symbol-name form)))
    (t (list form))))
+
+(defun cljbang--quote-literal (form)
+  "Quote FORM as Clojure quotes a literal collection, element by element."
+  (cond ((and (consp form)
+              (memq (car form) '(cljbang--map-literal cljbang--set-literal)))
+         (cons (car form) (mapcar #'cljbang--quote-literal (cdr form))))
+        ((vectorp form)
+         (apply #'vector (mapcar #'cljbang--quote-literal (append form nil))))
+        (t (list 'quote form))))
 
 (defun cljbang--needs-splice-p (form)
   "Whether FORM holds a brace or a comma, so the splicing pass has work.
@@ -721,20 +739,29 @@ first is cheaper than building a token list for every one."
 
 (defun cljbang--splice-braces-1 (forms)
   "Do the splicing that `cljbang--splice-braces' decided is needed."
-  (let ((stack (list nil)) kinds)
+  (let ((stack (list nil)) kinds quoted pending)
     (dolist (tok (mapcan #'cljbang--brace-tokens forms))
       (cond
+       ((eq tok cljbang--quote-marker) (setq pending t))
        ((eq tok '\{)
         ;; #{ arrives here as the marker symbol followed by {
         (let ((set? (eq (car (car stack)) cljbang--set-marker)))
           (when set? (setcar stack (cdr (car stack))))
           (push (if set? 'cljbang--set-literal 'cljbang--map-literal) kinds)
+          (push pending quoted)
+          (setq pending nil)
           (push nil stack)))
        ((eq tok '\})
         (unless (cdr stack) (error "cljbang: unbalanced } in Clojure form"))
-        (let ((m (cons (pop kinds) (nreverse (pop stack)))))
-          (push m (car stack))))
-       (t (push (cljbang--splice-form tok) (car stack)))))
+        (let* ((was-quoted (pop quoted))
+               (m (cons (pop kinds) (nreverse (pop stack)))))
+          (push (if was-quoted (cljbang--quote-literal m) m) (car stack))))
+       ;; the set marker is not a value, so a pending quote passes over it
+       ;; to the brace that follows
+       ((eq tok cljbang--set-marker) (push tok (car stack)))
+       (t (let ((v (cljbang--splice-form tok)))
+            (push (if pending (progn (setq pending nil) (list 'quote v)) v)
+                  (car stack))))))
     (when (cdr stack) (error "cljbang: unbalanced { in Clojure form"))
     (nreverse (car stack))))
 
