@@ -231,6 +231,32 @@
   (should-error (cljbang-test--eval "(subs \"hello\" -1)"))
   (should-error (cljbang-test--eval "(subs \"hello\" 0 -1)")))
 
+(ert-deftest cljbang-test-equality-is-structural ()
+  "Elisp equal compares hash tables by identity; Clojure's = does not."
+  (should (cljbang-test--eval "(= {:a 1} {:a 1})"))
+  (should (cljbang-test--eval "(= {[1 2] 1} {[1 2] 1})"))
+  (should (cljbang-test--eval "(= {:a [1]} {:a [1]})"))
+  (should (cljbang-test--eval "(= #{1 2} #{2 1})"))
+  (should-not (cljbang-test--eval "(= {:a 1} {:a 2})"))
+  (should-not (cljbang-test--eval "(= {:a 1} {:a 1 :b 2})"))
+  (should-not (cljbang-test--eval "(= #{1 2} #{1 3})")))
+
+(ert-deftest cljbang-test-equality-spans-sequential-types ()
+  (should (cljbang-test--eval "(= [1 2] [1 2])"))
+  (should (cljbang-test--eval "(= [1 2] (list 1 2))"))
+  (should-not (cljbang-test--eval "(= [1 2] [1 3])"))
+  ;; nil is not an empty sequence, as in Clojure
+  (should-not (cljbang-test--eval "(= [] nil)")))
+
+(ert-deftest cljbang-test-equality-is-variadic ()
+  (should (cljbang-test--eval "(= 1 1 1)"))
+  (should-not (cljbang-test--eval "(= 1 1 2)"))
+  (should (cljbang-test--eval "(= {:a 1} {:a 1} {:a 1})")))
+
+(ert-deftest cljbang-test-not-equal ()
+  (should-not (cljbang-test--eval "(not= {:a 1} {:a 1})"))
+  (should (cljbang-test--eval "(not= {:a 1} {:a 2})")))
+
 (ert-deftest cljbang-test-count ()
   (should (= 3 (cljbang-test--eval "(count [1 2 3])")))
   (should (= 2 (cljbang-test--eval "(count {:a 1 :b 2})")))

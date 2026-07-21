@@ -124,6 +124,42 @@ which are vector-like, out of the lookup branches."
     (puthash k v h)
     h))
 
+;; Elisp's equal compares hash tables by identity and keeps vectors and
+;; lists apart.  Clojure's = is structural, spans the sequential types,
+;; and takes any number of arguments.
+
+(defun cljbang--sequential-p (x)
+  "Whether X is one of Clojure's sequential collections.
+Strings are not, and nil is not, so (= [] nil) stays false as in Clojure."
+  (or (vectorp x) (and (consp x) (proper-list-p x))))
+
+(defun cljbang--equal (a b)
+  (cond
+   ((and (hash-table-p a) (hash-table-p b))
+    (and (= (hash-table-count a) (hash-table-count b))
+         (catch 'cljbang--unequal
+           (maphash (lambda (k v)
+                      (let ((bv (gethash k b 'cljbang--absent)))
+                        (when (or (eq bv 'cljbang--absent)
+                                  (not (cljbang--equal v bv)))
+                          (throw 'cljbang--unequal nil))))
+                    a)
+           t)))
+   ((or (hash-table-p a) (hash-table-p b)) nil)
+   ((and (cljbang--sequential-p a) (cljbang--sequential-p b))
+    (let ((la (append a nil))
+          (lb (append b nil)))
+      (and (= (length la) (length lb))
+           (cl-every #'cljbang--equal la lb))))
+   ((or (cljbang--sequential-p a) (cljbang--sequential-p b)) nil)
+   (t (equal a b))))
+
+(defun cljbang-= (a b &rest more)
+  "Whether A, B and MORE are equal, structurally, as in Clojure."
+  (and (cljbang--equal a b)
+       (or (null more)
+           (apply #'cljbang-= b more))))
+
 (defun cljbang--pr-str (x)
   (cond ((null x) "nil")
         ((eq x t) "true")
@@ -153,7 +189,7 @@ which are vector-like, out of the lookup branches."
 (defconst cljbang--core-fns
   ;; / is elisp division: integers, no ratios
   '((+ . +) (- . -) (* . *) (/ . /) (mod . mod)
-    (= . equal) (not= . cljbang-not=) (< . <) (> . >) (<= . <=) (>= . >=)
+    (= . cljbang-=) (not= . cljbang-not=) (< . <) (> . >) (<= . <=) (>= . >=)
     (inc . 1+) (dec . 1-) (not . not)
     (odd? . cl-oddp) (even? . cl-evenp) (zero? . zerop)
     (first . cljbang-first) (second . cljbang-second) (rest . cljbang-rest)
@@ -167,7 +203,7 @@ which are vector-like, out of the lookup branches."
     (subs . cljbang-subs)
     (load-file . cljbang-load-file)))
 
-(defun cljbang-not= (a b) (not (equal a b)))
+(defun cljbang-not= (&rest args) (not (apply #'cljbang-= args)))
 
 ;;; Namespaced symbols: str/join etc.
 ;;

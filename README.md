@@ -128,6 +128,11 @@ not an error, since an alias may name a symbol prefix rather than
 something loadable. Use `:as-alias` to name a namespace without loading
 it, as in Clojure.
 
+Order matters, because a file is compiled and evaluated one form at a
+time. The `ns` form runs its requires before anything below it, so a
+dependency is loaded by the time the rest of the file is compiled. Within
+a file, define before you use.
+
 The same munging works in reverse, which is what makes ns-qualified syntax
 the natural way to call an Emacs package:
 
@@ -179,11 +184,19 @@ map filter reduce str println name subs
 hash-map hash-set load-file
 ```
 
-`clojure.string`, under any alias:
+`clojure.string`, aliased to `str` out of the box, so `clj!` needs no
+require for it:
 
 ```
 join split replace upper-case lower-case capitalize trim blank?
 ```
+
+```clojure
+(str/join ", " ["a" "b"])   ;; => "a, b"
+```
+
+`str` is the only alias predefined. Any other alias comes from a
+`:require`, which also means `clj!` cannot use one, having no ns form.
 
 Map and set literals, destructuring (sequential and associative, nested,
 in `let` and in fn params), and sets, maps, keywords and vectors called as
