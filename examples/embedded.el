@@ -5,7 +5,9 @@
 ;; macro-expansion time, so byte-compiling this file byte-compiles the
 ;; Clojure too.
 
-(add-to-list 'load-path (file-name-directory (or load-file-name buffer-file-name)))
+(add-to-list 'load-path
+             (expand-file-name
+              ".." (file-name-directory (or load-file-name buffer-file-name))))
 (require 'cljbang)
 
 (clj!
@@ -62,8 +64,11 @@
 
 ;; ...and unknown namespaces munge ns/name -> ns--name, so any elisp
 ;; package's double-dash functions are callable, Clojure-style.
-(defun mylib--greet (name) (concat "Hello, " name "!"))
+(defun mylib-greet (name) (concat "Hello, " name "!"))
 (clj! (println "munged interop:" (mylib/greet "borkdude")))
+;; and the internal, two-dash form is reached through el/
+(defun mylib--secret () "shh")
+(clj! (println "internal name:" (el/mylib--secret)))
 
 (clj!
  (defn foo [x y] (str x y))
@@ -80,4 +85,6 @@
   (println "timed result:"
            (time (reduce + 0 (map square [1 2 3 4 5 6 7 8 9 10]))))))
 
-(clj! (load-file "test-file.clj"))
+(let ((default-directory
+       (file-name-directory (or load-file-name buffer-file-name))))
+  (clj! (load-file "nsdemo.clj")))

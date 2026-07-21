@@ -15,10 +15,10 @@
                         "cljbang.el" "cljbang-mode.el")}
 
   bench {:doc "Compare the compile and run cost against plain elisp"
-         :task (shell emacs "--batch" "-L" "." "-l" "bench-compile.el")}
+         :task (shell emacs "--batch" "-L" "." "-l" "bench/compile.el")}
 
   bench-load {:doc "Compare load cost, source vs byte-compiled"
-              :task (shell emacs "--batch" "-L" "." "-l" "bench-load.el")}
+              :task (shell emacs "--batch" "-L" "." "-l" "bench/load.el")}
 
   clean {:doc "Remove byte-compiled files and compiled .clj caches"
          :task (doseq [f (fs/glob "." "**.elc")] (fs/delete f))}

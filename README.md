@@ -21,6 +21,31 @@ writing quick functions and scripts.  Instead this project is a lite compiler
 sitting in your elisp runtime and integrates tightly with it. You can just evaluate "Clojure" (in the cljbang dialect) as Elisp in a `.clj` buffer.
 
 
+Which buffers are visiting a file that is no longer there:
+
+```clojure
+(defn stale-buffers []
+  (->> (el/buffer-list)
+       (filter (fn [b] (let [f (el/buffer-file-name b)]
+                         (and f (not (el/file-exists-p f))))))
+       (map el/buffer-name)))
+```
+
+The same thing in Emacs Lisp, which is what it compiles to:
+
+```emacs-lisp
+(defun stale-buffers ()
+  (let (result)
+    (dolist (b (buffer-list) (nreverse result))
+      (let ((f (buffer-file-name b)))
+        (when (and f (not (file-exists-p f)))
+          (push (buffer-name b) result))))))
+```
+
+Same buffers, no subprocess, no bridge. `buffer-list`, `buffer-file-name`
+and `file-exists-p` are the Emacs functions you already know, reached
+through `el/`.
+
 ## Installation
 
 Requires Emacs 28.1 or later.
@@ -44,7 +69,7 @@ time, because the macro is already expanded.
 
 ## Usage
 
-You can use the `clj!` macro directly in side of en elisp buffer:
+You can use the `clj!` macro directly inside an elisp buffer:
 
 ```emacs-lisp
 (clj! (defn winner [{:keys [alice bob]}]
