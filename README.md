@@ -125,10 +125,23 @@ my-config-answer          ;; => 7
 (my-config--shout "hey")  ;; => "HEY"
 ```
 
-They are ordinary elisp functions: arity is checked, `interactive` makes
-a command, `C-h f` shows the arglist and the docstring. What crosses the
-boundary is Clojure-shaped, so a map parameter wants a cljbang map rather
-than an alist, and a map return value is a hash table.
+They are ordinary elisp functions. Arity is checked, `interactive` makes
+a command, and `C-h f` shows the arglist and docstring.
+
+Destructuring reads native elisp data, so an alist or plist works
+wherever a map does:
+
+```clojure
+(defn port [{:keys [host port]}] (str host ":" port))
+```
+
+```emacs-lisp
+(port '((:host . "localhost") (:port . 8080)))   ;; => "localhost:8080"
+(port '(:host "localhost" :port 8080))           ;; => "localhost:8080"
+```
+
+A map that cljbang builds is a hash table, so elisp reading one back uses
+`gethash`.
 
 ```clojure
 (my.config/greet "you")   ;; from cljbang, reach them with the namespace
