@@ -4,12 +4,12 @@ A Clojure-like language that runs as Emacs Lisp.
 
 Cljbang (`clj!`) compiles Clojure forms to Emacs Lisp forms and evaluates them in the
 running Emacs. There is no subprocess, no transpiled text, and no runtime
-beyond `cljbang.el` itself.
+beyond `cljbang-core.el` itself.
 
-This project is heavily influenced by how I wrote [Squint](https://squint-cljs.github.io/squint/) and adopts its philosophy to writing a Clojure-like:
+This project is heavily influenced by how I wrote [Squint](https://squint-cljs.github.io/squint/) and adopts its philosophy:
 
-- Host and its data structures are embraced: interop should be first class without transforming between islands
-- Light-weight: the compiler step should be fast such that using Cljbang doesn't incur a lot of overhead compared to using elisp directly.
+- Embrace the host and its data structures: interop should be first class without transforming between islands
+- Light-weight: compilation happens at macro-expansion, so a byte-compiled file costs nothing at load. Uncompiled, about 70ms per 1000 defns.
 - Performance first: compiled output should run fast, in the same ballpark as elisp
 
 My previous attempt at a similar project to bring Clojure to Elisp involved a
