@@ -84,7 +84,7 @@
 ;; ns-name with dots as dashes.  The munge doubles as interop:
 ;; (magit/status) calls elisp `magit-status'.
 
-(defconst cljbang--ns-aliases
+(defconst cljbang--ns-default-aliases
   '((str . "clojure.string")))
 
 ;; Current namespace: (ns foo) makes subsequent defn/def intern munged
@@ -94,22 +94,17 @@
 ;; later form can call an earlier defn even though nothing has been
 ;; evaluated yet.
 
-(defvar cljbang--current-ns nil
-  "Name of the current Clojure namespace (a string), or nil.")
-
-(defvar cljbang--ns-alias-map nil
-  "Alist of alias symbol -> namespace name, from (ns ... (:require ... :as ...)).")
+;; The namespace in effect, the aliases it declared and the vars it
+;; defined all live in `cljbang--ns-state', which cljbang-core.el owns
+;; because a compiled file sets the namespace when it loads.
 
 (defvar cljbang--macros (make-hash-table :test #'equal)
   "Macro name -> expander function.
 Registered while compiling, so a later form in the same file can use a
-macro defined above it, as `cljbang--ns-vars' does for defn.")
+macro defined above it, as the var table does for defn.")
 
 (defvar cljbang--expanding 0
   "Depth of macro expansion, to catch a macro that expands to itself.")
-
-(defvar cljbang--ns-vars (make-hash-table :test #'equal)
-  "Namespace name -> hash table whose keys are var names defined there.")
 
 (defun cljbang--munge-ns (ns)
   (string-replace "." "-" ns))
@@ -178,7 +173,7 @@ An alias for a prefix that names no feature is allowed when something is
 actually defined under it, so a typo is still an error."
   (unless (or (gethash ns cljbang--loaded-ns)
               ;; namespaces cljbang implements itself
-              (rassoc ns cljbang--ns-aliases))
+              (rassoc ns cljbang--ns-default-aliases))
     ;; marked before loading, so a cycle terminates
     (puthash ns t cljbang--loaded-ns)
     (let ((file (cljbang--find-ns-file ns)))
@@ -196,25 +191,20 @@ actually defined under it, so a typo is still an error."
 (defun cljbang--ns-intern (name &optional private)
   "Munged elisp symbol for NAME in the current ns; records the var.
 PRIVATE gives the double dash elisp uses for internal names."
-  (if cljbang--current-ns
-      (let ((vars (or (gethash cljbang--current-ns cljbang--ns-vars)
-                      (puthash cljbang--current-ns
-                               (make-hash-table :test #'equal)
-                               cljbang--ns-vars)))
-            (sym (intern (concat (cljbang--munge-ns cljbang--current-ns)
+  (if-let* ((ns (cljbang--current-ns)))
+      (let ((sym (intern (concat (cljbang--munge-ns ns)
                                  (if private "--" "-")
                                  (symbol-name name)))))
         ;; store the symbol, so resolving does not have to guess which
         ;; spelling this var was defined with
-        (puthash (symbol-name name) sym vars)
+        (puthash (symbol-name name) sym (cljbang--ns-var-table))
         sym)
     name))
 
 (defun cljbang--ns-resolve (sym)
   "Munged symbol for SYM when it names a var in the current ns, else nil."
-  (when-let* ((ns cljbang--current-ns)
-              (vars (gethash ns cljbang--ns-vars)))
-    (gethash (symbol-name sym) vars)))
+  (when (cljbang--current-ns)
+    (gethash (symbol-name sym) (cljbang--ns-var-table))))
 
 ;; el/ is the host environment, the way js/ is in ClojureScript: the name
 ;; after it is an elisp symbol taken verbatim.  It escapes ns munging
@@ -227,29 +217,46 @@ PRIVATE gives the double dash elisp uses for internal names."
   (when ns (puthash (concat ns "/" name) expander cljbang--macros))
   nil)
 
+(defun cljbang--spec-parts (spec)
+  "SPEC as a list, whatever shape a require wrote it in."
+  (if (vectorp spec) (append spec nil) (list spec)))
+
+(defun cljbang--spec-alias (spec)
+  "The (ALIAS . NAMESPACE) that a require SPEC declares, or nil."
+  (let* ((parts (cljbang--spec-parts spec))
+         (as (or (cadr (memq :as parts)) (cadr (memq :as-alias parts)))))
+    (when as (cons as (symbol-name (car parts))))))
+
 (defun cljbang--require-spec (spec)
   "Register the alias in SPEC and load what it names.
 Returns the namespace to load at run time, or nil for :as-alias, which
 names a namespace without loading it as in Clojure."
-  (let* ((spec (if (vectorp spec) (append spec nil) (list spec)))
-         (required (symbol-name (car spec)))
-         (alias-only (cadr (memq :as-alias spec)))
-         (as (or (cadr (memq :as spec)) alias-only)))
-    (when as
-      (setf (alist-get as cljbang--ns-alias-map) required))
+  (let* ((parts (cljbang--spec-parts spec))
+         (required (symbol-name (car parts)))
+         (alias-only (cadr (memq :as-alias parts))))
+    (when-let* ((alias (cljbang--spec-alias spec)))
+      (cljbang--ns-add-alias (car alias) (cdr alias)))
     (unless alias-only
       (cljbang--require-ns required)
       required)))
 
+(defun cljbang--emit-aliases (specs)
+  "Forms that register the aliases SPECS declare, for a cached load."
+  (delq nil (mapcar (lambda (spec)
+                      (when-let* ((alias (cljbang--spec-alias spec)))
+                        `(cljbang--ns-add-alias ',(car alias) ,(cdr alias))))
+                    specs)))
+
 (defun cljbang--macro-function (sym)
   "Expander registered for SYM, plain or namespace qualified, or nil."
-  (let ((name (symbol-name sym)))
-    (or (and cljbang--current-ns
-             (gethash (concat cljbang--current-ns "/" name) cljbang--macros))
+  (let ((name (symbol-name sym))
+        (current (cljbang--current-ns)))
+    (or (and current
+             (gethash (concat current "/" name) cljbang--macros))
         (gethash name cljbang--macros)
         (when (string-search "/" name)
           (pcase-let ((`(,ns ,n) (split-string name "/")))
-            (gethash (concat (or (cdr (assq (intern ns) cljbang--ns-alias-map)) ns)
+            (gethash (concat (or (cdr (assq (intern ns) (cljbang--ns-aliases))) ns)
                              "/" n)
                      cljbang--macros))))))
 
@@ -272,8 +279,8 @@ names a namespace without loading it as in Clojure."
               (error "cljbang: %s has more than one /; use el/%s for an elisp name"
                      name name))
             (pcase-let* ((`(,ns ,n) parts)
-                         (full (or (cdr (assq (intern ns) cljbang--ns-alias-map))
-                                   (cdr (assq (intern ns) cljbang--ns-aliases))
+                         (full (or (cdr (assq (intern ns) (cljbang--ns-aliases)))
+                                   (cdr (assq (intern ns) cljbang--ns-default-aliases))
                                    ns)))
               (or (cdr (assoc (concat full "/" n) cljbang--ns-fns))
                   ;; one dash: the public elisp API, so lib/thing reaches
@@ -741,11 +748,12 @@ magti/status without complaining about magit/status."
 (defun cljbang--interned-here-p (sym)
   "Whether SYM is a var cljbang interned, which may not be evaluated yet."
   (catch 'cljbang--found
-    (maphash (lambda (_ns vars)
-               (maphash (lambda (_name s)
-                          (when (eq s sym) (throw 'cljbang--found t)))
-                        vars))
-             cljbang--ns-vars)
+    (maphash (lambda (key entry)
+               (unless (eq key :current)
+                 (maphash (lambda (_name s)
+                            (when (eq s sym) (throw 'cljbang--found t)))
+                          (plist-get entry :vars))))
+             cljbang--ns-state)
     nil))
 
 (defun cljbang--warn-unresolved (sym original)
@@ -810,29 +818,36 @@ magti/status without complaining about magit/status."
       ('comment nil)
       ('require
        ;; specs are quoted, as in Clojure
-       (let ((loaded (mapcar (lambda (arg)
-                               (cljbang--require-spec
-                                (if (and (consp arg) (eq (car arg) 'quote))
-                                    (cadr arg)
-                                  arg)))
-                             (cdr form))))
-         `(progn ,@(mapcar (lambda (ns) `(cljbang-require ,ns))
+       (let* ((specs (mapcar (lambda (arg)
+                               (if (and (consp arg) (eq (car arg) 'quote))
+                                   (cadr arg)
+                                 arg))
+                             (cdr form)))
+              (loaded (mapcar #'cljbang--require-spec specs)))
+         ;; the aliases are emitted too, so a cached load knows them and
+         ;; evaluating a new form afterwards resolves the same names
+         `(progn ,@(cljbang--emit-aliases specs)
+                 ,@(mapcar (lambda (ns) `(cljbang-require ,ns))
                            (delq nil loaded))
                  nil)))
       ('ns
        (let* ((name (symbol-name (cadr form)))
               (cljbang--load-file-dir (or (cljbang--ns-root name)
                                           cljbang--load-file-dir)))
-         (setq cljbang--current-ns name)
-         ;; register (:require [lib :as alias]) clauses
-         (let (loaded)
+         (cljbang--set-current-ns name)
+         ;; register (:require [lib :as alias]) clauses, which belong to
+         ;; this namespace, so they are recorded after it is in effect
+         (let (loaded specs)
            (dolist (clause (cddr form))
              (when (and (consp clause) (eq (car clause) :require))
                (dolist (spec (cdr clause))
+                 (push spec specs)
                  (push (cljbang--require-spec spec) loaded))))
-           ;; the loads are emitted as well as run, so a file restored
-           ;; from its cache still pulls in what it requires
-           `(progn (setq cljbang--current-ns ,name)
+           ;; the loads and the aliases are emitted as well as run, so a
+           ;; file restored from its cache pulls in what it requires and
+           ;; resolves the same names afterwards
+           `(progn (cljbang--set-current-ns ,name)
+                   ,@(cljbang--emit-aliases (nreverse specs))
                    ,@(mapcar (lambda (ns) `(cljbang-require ,ns))
                              (delq nil (nreverse loaded)))))))
       ('def
@@ -849,9 +864,10 @@ magti/status without complaining about magit/status."
                     (fn (cljbang--compile-fn tail env)))
          ;; registered now, so the rest of this file can use it, and
          ;; emitted too, so a compiled file registers it again on load
-         (cljbang--register-macro (symbol-name name) cljbang--current-ns (eval fn t))
+         (cljbang--register-macro (symbol-name name) (cljbang--current-ns)
+                                  (eval fn t))
          `(progn (cljbang--register-macro ,(symbol-name name)
-                                          ,cljbang--current-ns ,fn)
+                                          ,(cljbang--current-ns) ,fn)
                  ',name*)))
       ((or 'defn 'defn-)
        (pcase-let* ((`(,name . ,rest) (cdr form))
@@ -1094,9 +1110,9 @@ that no longer matches the compiler that made it."
 `cljbang-load-file' then loads that instead of running the compiler
 again, which is what makes a .clj file as cheap to load as elisp."
   (interactive "fCompile Clojure file: ")
-  (let* ((file (expand-file-name file))
+  (cljbang--with-ns (cljbang--current-ns)
+   (let* ((file (expand-file-name file))
          (src (with-temp-buffer (insert-file-contents file) (buffer-string)))
-         (cljbang--current-ns cljbang--current-ns)
          (cljbang--load-file-name file)
          (cljbang--load-file-dir (file-name-directory file))
          ;; named so byte-compile-file lands on the cache name
@@ -1117,23 +1133,23 @@ again, which is what makes a .clj file as cheap to load as elisp."
               (insert "\n")))
           (byte-compile-file scratch))
       (when (file-exists-p scratch) (delete-file scratch)))
-    (cljbang--cache-file file)))
+    (cljbang--cache-file file))))
 
 (defvar cljbang--file-value nil
   "Value of the last form of the file just loaded from a cache.")
 
 (defun cljbang--load-file-uncached (file)
   "Compile and evaluate FILE without touching a cache."
-  (let ((src (with-temp-buffer
-               (insert-file-contents file)
-               (buffer-string)))
-        ;; an (ns ...) in the file takes effect during the load only,
-        ;; like Clojure's load-file preserving the caller's *ns*
-        (cljbang--current-ns cljbang--current-ns)
-        ;; the root a :require resolves against is derived from the ns
-        (cljbang--load-file-name (expand-file-name file))
-        (cljbang--load-file-dir (file-name-directory (expand-file-name file))))
-    (cljbang-eval-string src)))
+  ;; an (ns ...) in the file takes effect during the load only, like
+  ;; Clojure's load-file preserving the caller's *ns*
+  (cljbang--with-ns (cljbang--current-ns)
+    (let ((src (with-temp-buffer
+                 (insert-file-contents file)
+                 (buffer-string)))
+          ;; the root a :require resolves against is derived from the ns
+          (cljbang--load-file-name (expand-file-name file))
+          (cljbang--load-file-dir (file-name-directory (expand-file-name file))))
+      (cljbang-eval-string src))))
 
 (defun cljbang-require (ns &optional reload)
   "Load namespace NS, the way a :require inside an ns form does.
@@ -1314,11 +1330,11 @@ so loading costs about what the equivalent elisp would.  A directory
 that cannot be written simply gets no cache.  Returns the value of the
 last form."
   (interactive "fLoad Clojure file: ")
-  (let* ((file (expand-file-name file))
+  ;; an (ns ...) in the file takes effect during the load only, whether it
+  ;; ran now or was baked into the cache
+  (cljbang--with-ns (cljbang--current-ns)
+   (let* ((file (expand-file-name file))
          (cache (cljbang--cache-file file))
-         ;; an (ns ...) in the file takes effect during the load only,
-         ;; whether it ran now or was baked into the cache
-         (cljbang--current-ns cljbang--current-ns)
          ;; a require emitted into the cache resolves against the same
          ;; place it did when the file was compiled
          (cljbang--load-file-name file)
@@ -1333,7 +1349,7 @@ last form."
      (t
       (cljbang-compile-file file)
       (load cache nil t)
-      cljbang--file-value))))
+      cljbang--file-value)))))
 
 
 
