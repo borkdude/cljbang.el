@@ -17,6 +17,9 @@
 (defun clj2el-rest (coll)
   (seq-into (seq-drop coll 1) 'list))
 
+(defun clj2el-second (coll)
+  (clj2el-first (clj2el-rest coll)))
+
 (defun clj2el-map (f coll)
   (mapcar (lambda (x) (funcall f x)) (seq-into coll 'list)))
 
@@ -37,6 +40,32 @@
   (let ((h (make-hash-table :test #'equal)))
     (while kvs (puthash (pop kvs) (pop kvs) h))
     h))
+
+(defun clj2el-subs (s start &optional end)
+  "Substring of S from START to END.
+Elisp's substring counts a negative index from the end of the string;
+Clojure's subs treats it as out of range, so reject it."
+  (when (or (< start 0) (and end (< end 0)))
+    (error "String index out of range: %d" (if (< start 0) start end)))
+  (substring s start end))
+
+(defun clj2el-nth (coll i &rest not-found)
+  "Element I of COLL.  Out of range is an error unless NOT-FOUND is given."
+  (cond ((and coll (>= i 0) (< i (clj2el-count coll))) (seq-elt coll i))
+        (not-found (car not-found))
+        ((null coll) nil)
+        (t (error "Index out of bounds: %d" i))))
+
+(defun clj2el-name (x)
+  "Name of keyword, symbol or string X, without colon or namespace."
+  (cond ((stringp x) x)
+        ;; a keyword is a symbol here, so both lose the colon then the ns
+        ((symbolp x)
+         (let* ((s (symbol-name x))
+                (s (if (string-prefix-p ":" s) (substring s 1) s))
+                (i (string-search "/" s)))
+           (if i (substring s (1+ i)) s)))
+        (t (error "clj2el: cannot take name of %S" x))))
 
 (defun clj2el-get (m k &optional default)
   (cond ((hash-table-p m) (gethash k m default))
@@ -75,17 +104,19 @@
 ;;; Clojure name -> elisp function mapping
 
 (defconst clj2el--core-fns
+  ;; / is elisp division: integers, no ratios
   '((+ . +) (- . -) (* . *) (/ . /) (mod . mod)
     (= . equal) (not= . clj2el-not=) (< . <) (> . >) (<= . <=) (>= . >=)
     (inc . 1+) (dec . 1-) (not . not)
     (odd? . cl-oddp) (even? . cl-evenp) (zero? . zerop)
-    (first . clj2el-first) (rest . clj2el-rest)
+    (first . clj2el-first) (second . clj2el-second) (rest . clj2el-rest)
     (map . clj2el-map) (filter . clj2el-filter) (reduce . clj2el-reduce)
     (str . clj2el-str) (println . clj2el-println)
     (get . clj2el-get) (count . clj2el-count)
+    (nth . clj2el-nth) (name . clj2el-name)
     (conj . clj2el-conj) (hash-map . clj2el-hash-map)
     (assoc . clj2el-assoc)
-    (subs . substring)
+    (subs . clj2el-subs)
     (load-file . clj2el-load-file)))
 
 (defun clj2el-not= (a b) (not (equal a b)))
@@ -160,19 +191,35 @@
     ("clojure.string/trim" . string-trim)
     ("clojure.string/blank?" . string-blank-p)))
 
+;; el/ is the host environment, the way js/ is in ClojureScript: the name
+;; after it is an elisp symbol taken verbatim.  It escapes ns munging
+;; (el/my/flymake-inline-ov keeps its slash) and the clj2el--core-fns
+;; overrides, so elisp's own get, assoc, + ... stay reachable.
+
+(defun clj2el--el-symbol (sym)
+  "Elisp symbol named by an el/ qualified SYM, or nil."
+  (let ((name (symbol-name sym)))
+    (when (and (string-prefix-p "el/" name) (> (length name) 3))
+      (intern (substring name 3)))))
+
 (defun clj2el--qualified (sym)
   "Resolve ns-qualified SYM to an elisp function symbol, or nil."
   (let ((name (symbol-name sym)))
-    (when (and (> (length name) 1)
-               (string-search "/" name)
-               (not (string-prefix-p "/" name))
-               (not (string-suffix-p "/" name)))
-      (pcase-let* ((`(,ns ,n) (split-string name "/"))
-                   (full (or (cdr (assq (intern ns) clj2el--ns-alias-map))
-                             (cdr (assq (intern ns) clj2el--ns-aliases))
-                             ns)))
-        (or (cdr (assoc (concat full "/" n) clj2el--ns-fns))
-            (intern (concat (string-replace "." "-" full) "--" n)))))))
+    (or (clj2el--el-symbol sym)
+        (when (and (> (length name) 1)
+                   (string-search "/" name)
+                   (not (string-prefix-p "/" name))
+                   (not (string-suffix-p "/" name)))
+          (let ((parts (split-string name "/")))
+            (unless (= (length parts) 2)
+              (error "clj2el: %s has more than one /; use el/%s for an elisp name"
+                     name name))
+            (pcase-let* ((`(,ns ,n) parts)
+                         (full (or (cdr (assq (intern ns) clj2el--ns-alias-map))
+                                   (cdr (assq (intern ns) clj2el--ns-aliases))
+                                   ns)))
+              (or (cdr (assoc (concat full "/" n) clj2el--ns-fns))
+                  (intern (concat (string-replace "." "-" full) "--" n)))))))))
 
 ;;; Reader: parseclj AST -> elisp data
 
@@ -195,23 +242,117 @@
 
 ;;; Compiler: Clojure form -> elisp form
 
-(defun clj2el--params (vec)
-  "Convert a Clojure param vector to an elisp arglist (& -> &rest)."
-  (mapcar (lambda (p) (if (eq p '&) '&rest p)) (append vec nil)))
-
 (defun clj2el--compile-body (forms env)
   (mapcar (lambda (f) (clj2el-compile f env)) forms))
 
+;;; Destructuring
+;;
+;; let bindings and fn params take the same patterns, so both funnel
+;; through clj2el--destructure, which flattens one pattern into plain
+;; let* pairs.  A pattern binds its value to a gensym and then indexes
+;; into it (sequential) or looks keys up in it (associative).  Patterns
+;; nest, so the expansion recurses.
+
+(defun clj2el--nth (coll i)
+  "Element I of COLL, or nil when out of range, like Clojure's nth."
+  (cond ((null coll) nil)
+        ((listp coll) (nth i coll))
+        ((< i (length coll)) (seq-elt coll i))))
+
+(defun clj2el--drop (coll i)
+  "Elements of COLL from index I on, as a list."
+  (seq-drop (seq-into coll 'list) i))
+
+(defun clj2el--destructure (pattern val env)
+  "Bindings that bind PATTERN to VAL, an elisp form, in `let*' order."
+  (cond ((symbolp pattern) (list (list pattern val)))
+        ((vectorp pattern) (clj2el--destructure-seq pattern val env))
+        ((and (consp pattern) (eq (car pattern) 'clj2el--map-literal))
+         (clj2el--destructure-map (cdr pattern) val env))
+        (t (error "clj2el: unsupported destructuring pattern %S" pattern))))
+
+(defun clj2el--destructure-seq (vec val env)
+  "Bindings for sequential pattern VEC, supporting & and :as."
+  (let ((elts (append vec nil)) fixed rest-pat as)
+    (while elts
+      (let ((p (pop elts)))
+        (cond ((eq p '&) (setq rest-pat (pop elts)))
+              ((eq p :as) (setq as (pop elts)))
+              (t (push p fixed)))))
+    (setq fixed (nreverse fixed))
+    (let* ((g (gensym "clj2el--seq"))
+           (bindings (list (list g val)))
+           (i -1))
+      (dolist (p fixed)
+        (setq i (1+ i))
+        (setq bindings
+              (nconc bindings (clj2el--destructure p `(clj2el--nth ,g ,i) env))))
+      (when rest-pat
+        (setq bindings
+              (nconc bindings (clj2el--destructure
+                               rest-pat `(clj2el--drop ,g ,(length fixed)) env))))
+      (when as (setq bindings (nconc bindings (list (list as g)))))
+      bindings)))
+
+(defun clj2el--destructure-map (kvs val env)
+  "Bindings for associative pattern KVS, supporting :keys, :or and :as.
+KVS is the flat key/value list of a map literal; in an explicit pair the
+key is the pattern and the value is the map key to look up."
+  (let (keys or-kvs as pairs)
+    (cl-loop for (k v) on kvs by #'cddr
+             do (cond ((eq k :keys) (setq keys (append v nil)))
+                      ((eq k :as) (setq as v))
+                      ((eq k :or) (setq or-kvs (cdr v)))
+                      (t (push (cons k v) pairs))))
+    (setq pairs (nreverse pairs))
+    (let* ((g (gensym "clj2el--map"))
+           (bindings (list (list g val)))
+           (lookup (lambda (key pattern)
+                     ;; an :or entry keyed by the bound symbol supplies
+                     ;; the default third argument to clj2el-get
+                     (let ((d (and (symbolp pattern) (plist-member or-kvs pattern))))
+                       `(clj2el-get ,g ,key
+                                    ,@(when d (list (clj2el-compile (cadr d) env))))))))
+      (dolist (s keys)
+        (setq bindings
+              (nconc bindings
+                     (list (list s (funcall lookup
+                                            (intern (concat ":" (symbol-name s)))
+                                            s))))))
+      (dolist (p pairs)
+        (setq bindings
+              (nconc bindings (clj2el--destructure
+                               (car p) (funcall lookup (cdr p) (car p)) env))))
+      (when as (setq bindings (nconc bindings (list (list as g)))))
+      bindings)))
+
 (defun clj2el--compile-fn (params body env)
-  (let* ((arglist (clj2el--params params))
-         (env* (append (remq '&rest arglist) env)))
-    `(lambda ,arglist ,@(clj2el--compile-body body env*))))
+  (let ((arglist nil) (patterns nil) (env* env))
+    ;; a destructuring param becomes a gensym in the arglist, unpacked by
+    ;; a let* wrapped around the body
+    (dolist (p (append params nil))
+      (cond ((eq p '&) (push '&rest arglist))
+            ((symbolp p) (push p arglist) (push p env*))
+            (t (let ((g (gensym "clj2el--arg")))
+                 (push g arglist)
+                 (push (cons p g) patterns)))))
+    (setq arglist (nreverse arglist))
+    (let (pairs)
+      (dolist (pat (nreverse patterns))
+        (dolist (b (clj2el--destructure (car pat) (cdr pat) env*))
+          (push b pairs)
+          (push (car b) env*)))
+      (let ((compiled (clj2el--compile-body body env*)))
+        `(lambda ,arglist
+           ,@(if pairs `((let* ,(nreverse pairs) ,@compiled)) compiled))))))
 
 (defun clj2el--compile-let (bindings body env)
   (let (pairs (env* env))
-    (cl-loop for (name val) on (append bindings nil) by #'cddr
-             do (push (list name (clj2el-compile val env*)) pairs)
-             (push name env*))
+    (cl-loop for (pattern val) on (append bindings nil) by #'cddr
+             do (dolist (b (clj2el--destructure
+                            pattern (clj2el-compile val env*) env*))
+                  (push b pairs)
+                  (push (car b) env*)))
     `(let* ,(nreverse pairs) ,@(clj2el--compile-body body env*))))
 
 (defun clj2el--thread (init forms first?)
@@ -228,9 +369,23 @@
         ((fboundp sym) (symbol-function sym))
         (t (error "Unable to resolve symbol: %s" sym))))
 
+(defun clj2el--assign-target (sym env)
+  "Elisp symbol SYM assigns to.  Unlike value position, it stays unevaluated."
+  (unless (symbolp sym)
+    (error "clj2el: set! needs a symbol, got %S" sym))
+  (cond ((memq sym env) sym)
+        ((clj2el--el-symbol sym))
+        ((clj2el--ns-resolve sym))
+        ((clj2el--qualified sym))
+        (t sym)))
+
 (defun clj2el--compile-symbol (form env)
   "Compile FORM in value position."
   (cond ((memq form env) form)
+        ;; el/ names a var as readily as a function, so resolve it the
+        ;; lisp-1 way rather than assuming #'
+        ((clj2el--el-symbol form)
+         `(clj2el--resolve ',(clj2el--el-symbol form)))
         ((clj2el--qualified form)
          `#',(clj2el--qualified form))
         ((clj2el--ns-resolve form)
@@ -264,8 +419,11 @@
          (dolist (clause (cddr form))
            (when (and (consp clause) (eq (car clause) :require))
              (dolist (spec (cdr clause))
+               ;; :as-alias behaves like :as here, there being nothing to
+               ;; load.  el/ resolves to the host environment either way.
                (let* ((spec (if (vectorp spec) (append spec nil) (list spec)))
-                      (as (cadr (memq :as spec))))
+                      (as (or (cadr (memq :as spec))
+                              (cadr (memq :as-alias spec)))))
                  (when as
                    (setf (alist-get as clj2el--ns-alias-map)
                          (symbol-name (car spec))))))))
@@ -285,9 +443,20 @@
        (let ((rest (cdr form)))
          (when (symbolp (car rest)) (pop rest)) ; drop optional fn name
          (clj2el--compile-fn (car rest) (cdr rest) env)))
+      ('set!
+       `(setq ,(clj2el--assign-target (cadr form) env)
+              ,(clj2el-compile (caddr form) env)))
       ('let (clj2el--compile-let (cadr form) (cddr form) env))
       ('if `(if ,@(clj2el--compile-body (cdr form) env)))
       ('when `(when ,@(clj2el--compile-body (cdr form) env)))
+      ('cond
+       ;; :else needs no special case: a keyword is truthy in elisp too
+       (let ((clauses (cdr form)))
+         (when (cl-oddp (length clauses))
+           (error "clj2el: cond needs an even number of forms"))
+         `(cond ,@(cl-loop for (test expr) on clauses by #'cddr
+                           collect (list (clj2el-compile test env)
+                                         (clj2el-compile expr env))))))
       ('do `(progn ,@(clj2el--compile-body (cdr form) env)))
       ('-> (clj2el-compile (clj2el--thread (cadr form) (cddr form) t) env))
       ('->> (clj2el-compile (clj2el--thread (cadr form) (cddr form) nil) env))
@@ -332,12 +501,64 @@
 ;;; Embedded Clojure: elisp's reader already accepts most Clojure
 ;;; surface syntax (vectors, keywords, quote), so Clojure forms can sit
 ;;; directly in an elisp buffer and compile at macro-expansion time.
-;;; Limitation: {...} map literals don't survive the elisp reader; use
-;;; (hash-map ...) inside clj! instead.
+;;; Limitation: #(...) is a read error inside clj!.  Use fn.
+
+;;; {...} needs no reader of its own.  Braces are symbol constituents to
+;;; the elisp reader, so {:a 1} comes back as the symbols `{:a' and `1}'
+;;; -- the delimiters survive, glued to their neighbours.  Splitting them
+;;; back off and reducing the result yields the same (clj2el--map-literal
+;;; k v ...) the parseclj path produces.
+
+(defun clj2el--lex-braces (name)
+  "Split symbol NAME into tokens, exposing { and } as separate symbols."
+  (let (tokens (start 0) (len (length name)))
+    (dotimes (i len)
+      (when (memq (aref name i) '(?{ ?}))
+        (when (> i start)
+          (push (car (read-from-string (substring name start i))) tokens))
+        (push (if (eq (aref name i) ?{) '\{ '\}) tokens)
+        (setq start (1+ i))))
+    (when (< start len)
+      (push (car (read-from-string (substring name start))) tokens))
+    (nreverse tokens)))
+
+(defun clj2el--brace-tokens (form)
+  "Expand FORM into the token(s) it contributes to a brace scan."
+  (cond
+   ;; a comma is whitespace in Clojure, but the elisp reader took it as
+   ;; unquote: (\, x) puts x back in the stream
+   ((and (consp form) (eq (car form) '\,) (= (length form) 2))
+    (clj2el--brace-tokens (cadr form)))
+   ((and form (symbolp form) (string-match-p "[{}]" (symbol-name form)))
+    (clj2el--lex-braces (symbol-name form)))
+   (t (list form))))
+
+(defun clj2el--splice-form (form)
+  (cond ((vectorp form) (apply #'vector (clj2el--splice-braces (append form nil))))
+        ;; a dotted pair is quoted elisp data, such as an alist.  Braces
+        ;; cannot span the dot, so recurse on both sides
+        ((and (consp form) (not (proper-list-p form)))
+         (cons (clj2el--splice-form (car form)) (clj2el--splice-form (cdr form))))
+        ((consp form) (clj2el--splice-braces form))
+        (t form)))
+
+(defun clj2el--splice-braces (forms)
+  "Reduce { } tokens in FORMS into (clj2el--map-literal ...) forms."
+  (let ((stack (list nil)))
+    (dolist (tok (mapcan #'clj2el--brace-tokens forms))
+      (cond
+       ((eq tok '\{) (push nil stack))
+       ((eq tok '\})
+        (unless (cdr stack) (error "clj2el: unbalanced } in Clojure form"))
+        (let ((m (cons 'clj2el--map-literal (nreverse (pop stack)))))
+          (push m (car stack))))
+       (t (push (clj2el--splice-form tok) (car stack)))))
+    (when (cdr stack) (error "clj2el: unbalanced { in Clojure form"))
+    (nreverse (car stack))))
 
 (defmacro clj! (&rest forms)
   "Compile Clojure FORMS to elisp at macro-expansion time."
-  `(progn ,@(mapcar (lambda (f) (clj2el-compile f)) forms)))
+  `(progn ,@(mapcar #'clj2el-compile (clj2el--splice-braces forms))))
 
 ;;; Loading whole files: implicit clj! around the file's contents
 
@@ -356,7 +577,7 @@
 (defun clj2el-load-file (file)
   "Load FILE of Clojure source, as if its contents were wrapped in `clj!'.
 When the source stays inside the elisp-readable subset it is read with
-the (fast, C) elisp reader; files using {...}, #(...) or #{...} go
+the (fast, C) elisp reader; files using #(...), #{...} or #_ go
 through parseclj instead.  Returns the value of the last form."
   (interactive "fLoad Clojure file: ")
   (let ((src (with-temp-buffer
@@ -365,10 +586,10 @@ through parseclj instead.  Returns the value of the last form."
         ;; an (ns ...) in the file takes effect during the load only,
         ;; like Clojure's load-file preserving the caller's *ns*
         (clj2el--current-ns clj2el--current-ns))
-    (if (string-match-p "[{}]\\|#[({_]" src)
+    (if (string-match-p "#[({_]" src)
         (clj2el-eval-string src)
       (let (result)
-        (dolist (f (clj2el--read-all src) result)
+        (dolist (f (clj2el--splice-braces (clj2el--read-all src)) result)
           (setq result (eval (clj2el-compile f) t)))))))
 
 ;;; Editor integration: eval-last-sexp that respects clj! context
@@ -447,8 +668,8 @@ Elsewhere falls back to `eval-last-sexp'."
 ;;; Completion: Clojure names + all of elisp, via completion-at-point
 
 (defconst clj2el--special-forms
-  '("def" "defn" "fn" "let" "if" "when" "do" "ns" "quote" "comment"
-    "->" "->>" "time" "with-out-str")
+  '("def" "defn" "fn" "let" "set!" "if" "when" "cond" "do" "ns" "quote"
+    "comment" "->" "->>" "time" "with-out-str")
   "Names handled as special forms by `clj2el-compile'.")
 
 (defun clj2el--completion-candidates ()
