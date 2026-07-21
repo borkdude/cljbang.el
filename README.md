@@ -361,8 +361,8 @@ Lisp semantics:
 #"\\(a\\|b\\)"       ;; elisp regex syntax, where Clojure writes #"(a|b)"
 (assoc m :k 1)      ;; copies the map, so O(n)
 
-(try (el/car 1)                        ;; catch takes an elisp error symbol,
-  (catch wrong-type-argument e e))     ;;    where Clojure writes Exception
+(catch file-missing e e)   ;; catch takes an elisp error symbol, not a
+                           ;;    class name like Exception
 
 (into {} [[:a 1]])     ;; an error. A map and a set are both hash tables,
                        ;;    so conj cannot tell assoc from adding the pair
