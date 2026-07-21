@@ -390,6 +390,31 @@ Not implemented:
 - The `:while` modifier in `doseq`.
 - Protocols and multimethods.
 
+## Shipping a package
+
+Emacs's `load-path` does not apply to `.clj` files, so an installed
+package must register its directory:
+
+```emacs-lisp
+;;; myproject.el --- Example cljbang package -*- lexical-binding: t -*-
+
+;; Package-Requires: ((emacs "28.1") (cljbang "0.0.4"))
+
+(require 'cljbang)
+(add-to-list 'cljbang-load-path
+             (file-name-directory (or load-file-name buffer-file-name)))
+(cljbang-require 'myproject.commands)
+(provide 'myproject)
+```
+
+Include `myproject/commands.clj` in the package, and name the namespace
+after the package, since what it defines is interned under that prefix.
+A `greet` there is `myproject-commands-greet`, an ordinary Emacs Lisp
+call after requiring `myproject`.
+
+Do not include `*.clj.*.elc` files. They are generated caches, not
+package files.
+
 ## Benchmarks
 
 This is a casual benchmark done on my local machine with Emacs 30.2 and 1000 `defn`s. You can reproduce it with `bb bench-load`
