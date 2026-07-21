@@ -22,6 +22,11 @@
 (defun cljbang-second (coll)
   (cljbang-first (cljbang-rest coll)))
 
+(defun cljbang-last (coll)
+  "The last element of COLL.  Elisp's last gives the last cons cell."
+  (let ((n (cljbang-count coll)))
+    (unless (zerop n) (seq-elt coll (1- n)))))
+
 ;; a set, map or keyword can be passed where a function is expected, as
 ;; in (filter #{1 3} xs).  cljbang--fn resolves that once per call rather
 ;; than once per element, so the ordinary case stays a bare funcall.
@@ -36,8 +41,27 @@
 (defun cljbang-filter (pred coll)
   (seq-filter (cljbang--fn pred) (seq-into coll 'list)))
 
+(defun cljbang-remove (pred coll)
+  (seq-remove (cljbang--fn pred) (seq-into coll 'list)))
+
 (defun cljbang-reduce (f init coll)
   (seq-reduce (cljbang--fn f) (seq-into coll 'list) init))
+
+(defun cljbang-concat (&rest colls)
+  "Concatenate COLLS into a list.  Elisp's concat would give a string."
+  (apply #'append (mapcar (lambda (c) (append c nil)) colls)))
+
+(defun cljbang--compare-lt (a b)
+  "Whether A sorts before B, over the types Clojure's compare handles."
+  (cond ((and (numberp a) (numberp b)) (< a b))
+        ((and (stringp a) (stringp b)) (string< a b))
+        ((and (symbolp a) (symbolp b)) (string< a b))
+        (t (error "cljbang: cannot compare %S and %S" a b))))
+
+(defun cljbang-sort (comp &optional coll)
+  "Sort COLL, by COMP when given.  Copies, since elisp's sort is destructive."
+  (unless coll (setq coll comp comp nil))
+  (sort (append coll nil) (if comp (cljbang--fn comp) #'cljbang--compare-lt)))
 
 (defun cljbang-count (coll)
   (if (hash-table-p coll) (hash-table-count coll) (seq-length coll)))

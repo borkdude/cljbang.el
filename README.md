@@ -255,8 +255,8 @@ Supported functions:
 
 ```
 + - * / mod = not= < > <= >= inc dec not odd? even? zero?
-first second rest nth count get contains? conj assoc
-map filter reduce str pr-str println prn name subs
+first second rest last nth count get contains? conj assoc
+map filter remove reduce concat sort str pr-str println prn name subs
 re-pattern re-find re-matches re-seq
 hash-map hash-set load-file
 ```

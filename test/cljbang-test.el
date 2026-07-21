@@ -404,6 +404,37 @@ keywords."
   (should (null (cljbang-test--eval "(second nil)")))
   (should (equal '(2 3) (cljbang-test--eval "(rest [1 2 3])"))))
 
+(ert-deftest cljbang-test-last ()
+  "Elisp last gives the last cons cell, Clojure's gives the last element."
+  (should (= 3 (cljbang-test--eval "(last [1 2 3])")))
+  (should (= 3 (cljbang-test--eval "(last '(1 2 3))")))
+  (should (null (cljbang-test--eval "(last [])")))
+  (should (null (cljbang-test--eval "(last nil)"))))
+
+(ert-deftest cljbang-test-remove ()
+  "Elisp remove deletes elements equal to its argument, Clojure's takes a predicate."
+  (should (equal '(2) (cljbang-test--eval "(remove odd? [1 2 3])")))
+  (should (equal '(2 4) (cljbang-test--eval "(remove #{1 3} [1 2 3 4])")))
+  (should (null (cljbang-test--eval "(remove odd? nil)"))))
+
+(ert-deftest cljbang-test-concat ()
+  "Elisp concat over vectors gives a string, Clojure's concat gives a sequence."
+  (should (equal '(1 2) (cljbang-test--eval "(concat [1] [2])")))
+  (should (equal '(1 2 3) (cljbang-test--eval "(concat '(1) [2] '(3))")))
+  (should (null (cljbang-test--eval "(concat)")))
+  (should (equal '(1) (cljbang-test--eval "(concat [1] nil)"))))
+
+(ert-deftest cljbang-test-sort ()
+  (should (equal '(1 2 3) (cljbang-test--eval "(sort [3 1 2])")))
+  (should (equal '("a" "b") (cljbang-test--eval "(sort [\"b\" \"a\"])")))
+  (should (equal '(3 2 1) (cljbang-test--eval "(sort > [1 3 2])")))
+  (should (null (cljbang-test--eval "(sort [])"))))
+
+(ert-deftest cljbang-test-sort-copies ()
+  "Elisp sort reorders its argument in place, Clojure's leaves it alone."
+  (should (equal '(3 1 2)
+                 (cljbang-test--eval "(let [v [3 1 2]] (sort v) (seq-into v 'list))"))))
+
 (ert-deftest cljbang-test-nth ()
   (should (= 2 (cljbang-test--eval "(nth [1 2 3] 1)")))
   (should (eq :none (cljbang-test--eval "(nth [1] 5 :none)")))
