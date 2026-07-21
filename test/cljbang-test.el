@@ -1212,10 +1212,33 @@ cannot take it."
   (should (equal '(:a) (cljbang-test--eval "(keys '((:a . 1)))")))
   (should (equal '(1) (cljbang-test--eval "(vals '((:a . 1)))"))))
 
-(ert-deftest cljbang-test-into-refuses-an-ambiguous-pair ()
-  "A map and a set are the same type, so a pair onto one is undecidable."
-  (should-error (cljbang-test--eval "(into {} [[:a 1]])"))
-  (should (= 2 (cljbang-test--eval "(count (into #{} [1 2]))"))))
+(ert-deftest cljbang-test-into-a-map-takes-pairs ()
+  "A set is its own type, so a pair onto a map can only mean assoc."
+  (should (= 1 (cljbang-test--eval "(get (into {} [[:a 1]]) :a)")))
+  (should (= 2 (cljbang-test--eval "(count (into {} [[:a 1] [:b 2]]))")))
+  (should (= 1 (cljbang-test--eval "(get (into {} {:a 1}) :a)")))
+  (should (= 1 (cljbang-test--eval "(get (conj {} [:a 1]) :a)")))
+  (should (= 2 (cljbang-test--eval "(get (conj {:a 1} {:b 2}) :b)")))
+  (should-error (cljbang-test--eval "(conj {} :a)"))
+  (should (= 2 (cljbang-test--eval "(count (into #{} [1 2 2]))"))))
+
+(ert-deftest cljbang-test-a-set-is-not-a-map ()
+  (should-not (cljbang-test--eval "(map? #{1})"))
+  (should (cljbang-test--eval "(set? #{1})"))
+  (should-not (cljbang-test--eval "(set? {})"))
+  (should-not (cljbang-test--eval "(= #{1} {1 1})"))
+  (should (equal "#{1}" (cljbang-test--eval "(pr-str #{1})")))
+  (should (equal '(1) (cljbang-test--eval "(seq #{1})"))))
+
+(ert-deftest cljbang-test-conj-onto-a-set-adds-the-element ()
+  "Even a pair, which onto a map would be an assoc."
+  (should (= 1 (cljbang-test--eval "(count (conj #{} [1 2]))")))
+  (should (cljbang-test--eval "(contains? (conj #{} [1 2]) [1 2])"))
+  (should (= 1 (cljbang-test--eval "(let [s #{1}] (conj s 2) (count s))"))))
+
+(ert-deftest cljbang-test-set-of-a-collection ()
+  (should (= 2 (cljbang-test--eval "(count (set [1 1 2]))")))
+  (should (cljbang-test--eval "(contains? (set [1 2]) 2)")))
 
 (ert-deftest cljbang-test-function-functions ()
   (should (= 3 (cljbang-test--eval "((partial + 1) 2)")))

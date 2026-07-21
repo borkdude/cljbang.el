@@ -147,7 +147,8 @@ Destructuring reads an alist, which is the shape Emacs passes around:
 
 Associative destructuring does not accept plists because they are
 ambiguous with ordinary lists. A map that cljbang builds is a hash table,
-so elisp reading one back uses `gethash`.
+so elisp reading one back uses `gethash`. A set is opaque to elisp, which
+has no set type.
 
 
 ### Require
@@ -282,7 +283,7 @@ Supported functions:
 
 ```
 + - * / mod = not= < > <= >= inc dec not odd? even? zero? pos? neg?
-first second rest last nth count get contains? conj assoc seq vec
+first second rest last nth count get contains? conj assoc seq vec set
 map filter remove reduce concat sort sort-by str pr-str println prn name subs
 mapv mapcat into range take drop take-while drop-while distinct
 some every? empty? apply partial comp complement constantly
@@ -290,7 +291,7 @@ keys vals merge dissoc select-keys update get-in assoc-in update-in
 re-pattern re-find re-matches re-seq
 hash-map hash-set throw ex-info ex-message ex-data ex-cause load-file
 atom deref reset! swap!
-keyword symbol nil? some? map? vector? fn? symbol? keyword?
+keyword symbol nil? some? map? set? vector? fn? symbol? keyword?
 string? number? integer? int?
 ```
 
@@ -366,9 +367,6 @@ Lisp semantics:
 
 (try (f) (catch :default e e))         ;; catches anything like CLJS
 (try (f) (catch el/file-missing e e))  ;; or a host error symbol, like js/Error
-
-(into {} [[:a 1]])     ;; an error. A map and a set are both hash tables,
-                       ;;    so conj cannot tell assoc from adding the pair
 
 (get '((:a . 1)) :a)   ;; => 1, an alist reads as a map
 (get '((1 2) (3 4)) 1) ;; => (2), and so does a list of lists. Clojure

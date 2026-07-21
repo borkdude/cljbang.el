@@ -126,12 +126,31 @@
   (sort (append coll nil) (if comp (cljbang--fn comp) #'cljbang--compare-lt)))
 
 (defun cljbang-count (coll)
-  (if (hash-table-p coll) (hash-table-count coll) (seq-length coll)))
+  (cond ((cljbang--set-p coll) (hash-table-count (cljbang--set-table coll)))
+        ((hash-table-p coll) (hash-table-count coll))
+        (t (seq-length coll))))
+
+;; A set is its own record over a hash table, not a bare one, so a map
+;; can be told from a set.  Elisp has no set type to interoperate with,
+;; so nothing is lost by making it opaque.
+
+(defun cljbang--set-p (x)
+  (and (recordp x) (eq (aref x 0) 'cljbang-set)))
+
+(defun cljbang--set-table (x) (aref x 1))
 
 (defun cljbang-conj (coll x)
   (cond ((vectorp coll) (vconcat coll (vector x)))
+        ((cljbang--set-p coll)
+         (let ((h (copy-hash-table (cljbang--set-table coll))))
+           (puthash x x h)
+           (record 'cljbang-set h)))
         ((hash-table-p coll)
-         (let ((h (copy-hash-table coll))) (puthash x x h) h))
+         ;; a map takes a [k v] pair or another map, as in Clojure
+         (cond ((and (vectorp x) (= 2 (length x)))
+                (cljbang-assoc coll (aref x 0) (aref x 1)))
+               ((hash-table-p x) (cljbang-merge coll x))
+               (t (error "cljbang: cannot conj %S onto a map" x))))
         (t (cons x coll))))
 
 ;; Clojure throws a value and catches that same value back.  Elisp signals
@@ -213,7 +232,9 @@
 
 (defun cljbang--list (coll)
   "COLL as a list, taking a map as its keys and values in pairs."
-  (cond ((hash-table-p coll)
+  (cond ((cljbang--set-p coll)
+         (hash-table-keys (cljbang--set-table coll)))
+        ((hash-table-p coll)
          (let (pairs)
            (maphash (lambda (k v) (push (vector k v) pairs)) coll)
            (nreverse pairs)))
@@ -225,6 +246,10 @@
     (and l l)))
 
 (defun cljbang-vec (coll) (seq-into (cljbang--list coll) 'vector))
+
+(defun cljbang-set (coll)
+  "Set of the elements of COLL."
+  (apply #'cljbang-hash-set (cljbang--list coll)))
 
 (defun cljbang-mapv (f coll)
   (seq-into (cljbang-map f coll) 'vector))
@@ -278,13 +303,6 @@
     (nreverse acc)))
 
 (defun cljbang-into (to from)
-  "Conj every element of FROM onto TO.
-A pair onto a hash table is refused, since a map and a set are the same
-type here, so there is no way to tell assoc from adding the pair itself."
-  (when (hash-table-p to)
-    (dolist (x (cljbang--list from))
-      (when (and (vectorp x) (= 2 (length x)))
-        (error "cljbang: into cannot tell a map from a set, use hash-map"))))
   (seq-reduce #'cljbang-conj (cljbang--list from) to))
 
 (defun cljbang-empty? (coll)
@@ -380,6 +398,7 @@ type here, so there is no way to tell assoc from adding the pair itself."
 (defun cljbang-nil? (x) (null x))
 (defun cljbang-some? (x) (not (null x)))
 (defun cljbang-map? (x) (hash-table-p x))
+(defun cljbang-set? (x) (cljbang--set-p x))
 (defun cljbang-fn? (x) (functionp x))
 
 (defun cljbang-symbol? (x)
@@ -418,14 +437,16 @@ Clojure's subs treats it as out of range, so reject it."
         (t (error "cljbang: cannot take name of %S" x))))
 
 (defun cljbang-hash-set (&rest xs)
-  "Set of XS, a hash table mapping each element to itself."
+  "Set of XS."
   (let ((h (make-hash-table :test #'equal)))
-    (dolist (x xs h) (puthash x x h))))
+    (dolist (x xs) (puthash x x h))
+    (record 'cljbang-set h)))
 
 (defun cljbang-get (m k &optional default)
   "Look K up in M, which may be a map, a vector, or an elisp alist or plist.
 Reading native elisp data matters because destructuring goes through here."
-  (cond ((hash-table-p m) (gethash k m default))
+  (cond ((cljbang--set-p m) (gethash k (cljbang--set-table m) default))
+        ((hash-table-p m) (gethash k m default))
         ((vectorp m) (if (and (integerp k) (>= k 0) (< k (length m)))
                          (aref m k)
                        default))
@@ -446,13 +467,17 @@ Sets, maps and vectors look their argument up.  A keyword looks itself
 up in its argument.  Checking functionp first keeps byte-code objects,
 which are vector-like, out of the lookup branches."
   (cond ((functionp f) (apply f args))
-        ((or (hash-table-p f) (vectorp f)) (apply #'cljbang-get f args))
+        ((or (hash-table-p f) (vectorp f) (cljbang--set-p f))
+         (apply #'cljbang-get f args))
         ((keywordp f) (apply #'cljbang-get (car args) f (cdr args)))
         (t (apply f args))))
 
 (defun cljbang-contains? (coll k)
   "Whether COLL has key K.  For a vector K is an index, as in Clojure."
-  (cond ((hash-table-p coll)
+  (cond ((cljbang--set-p coll)
+         (not (eq 'cljbang--absent
+                  (gethash k (cljbang--set-table coll) 'cljbang--absent))))
+        ((hash-table-p coll)
          (not (eq 'cljbang--absent (gethash k coll 'cljbang--absent))))
         ((vectorp coll) (and (integerp k) (>= k 0) (< k (length coll))))
         ((null coll) nil)
@@ -475,6 +500,18 @@ Strings are not, and nil is not, so (= [] nil) stays false as in Clojure."
 
 (defun cljbang--equal (a b)
   (cond
+   ((and (cljbang--set-p a) (cljbang--set-p b))
+    (let ((ta (cljbang--set-table a))
+          (tb (cljbang--set-table b)))
+      (and (= (hash-table-count ta) (hash-table-count tb))
+           (catch 'cljbang--unequal
+             (maphash (lambda (k _)
+                        (when (eq 'cljbang--absent
+                                  (gethash k tb 'cljbang--absent))
+                          (throw 'cljbang--unequal nil)))
+                      ta)
+             t))))
+   ((or (cljbang--set-p a) (cljbang--set-p b)) nil)
    ((and (hash-table-p a) (hash-table-p b))
     (and (= (hash-table-count a) (hash-table-count b))
          (catch 'cljbang--unequal
@@ -506,6 +543,10 @@ Strings are not, and nil is not, so (= [] nil) stays false as in Clojure."
     (cond ((null x) "nil")
           ((eq x t) "true")
           ((stringp x) (if readably (prin1-to-string x) x))
+          ((cljbang--set-p x)
+           (concat "#{"
+                   (mapconcat rec (hash-table-keys (cljbang--set-table x)) " ")
+                   "}"))
           ((hash-table-p x)
            (let (pairs)
              (maphash (lambda (k v)
