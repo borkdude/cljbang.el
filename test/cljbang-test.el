@@ -397,6 +397,57 @@
     (cljbang-load-file (cljbang-test--example "fast.clj"))
     (should (equal before cljbang--current-ns))))
 
+;;; Compiling a file to a cache
+
+(ert-deftest cljbang-test-compile-file-round-trip ()
+  "A cached load defines the same things, without running the compiler."
+  (let* ((dir (make-temp-file "cljbang-cache" t))
+         (f (expand-file-name "cached_conf.clj" dir)))
+    (unwind-protect
+        (progn
+          (write-region "(ns cachedconf)\n(defn greet [x] (str \"hi \" x))\n(def answer 42)\n"
+                        nil f nil 'quiet)
+          (cljbang-load-file-cached f)
+          (should (file-exists-p (cljbang--cache-file f)))
+          (should (equal "hi you" (cachedconf-greet "you")))
+          (should (= 42 cachedconf-answer))
+          ;; again, this time from the cache
+          (should (cljbang-load-file-cached f))
+          (should (equal "hi you" (cachedconf-greet "you"))))
+      (delete-directory dir t)
+      (setq cljbang--current-ns nil))))
+
+(ert-deftest cljbang-test-cache-rebuilds-when-source-changes ()
+  (let* ((dir (make-temp-file "cljbang-cache" t))
+         (f (expand-file-name "stale.clj" dir)))
+    (unwind-protect
+        (progn
+          (write-region "(defn stale-one [] 1)\n" nil f nil 'quiet)
+          (cljbang-load-file-cached f)
+          (should (= 1 (stale-one)))
+          ;; the cache must look older than the source
+          (set-file-times (cljbang--cache-file f) (time-subtract (current-time) 10))
+          (write-region "(defn stale-one [] 2)\n" nil f nil 'quiet)
+          (cljbang-load-file-cached f)
+          (should (= 2 (stale-one))))
+      (delete-directory dir t))))
+
+(ert-deftest cljbang-test-cached-file-registers-its-macros ()
+  "A macro has to survive a load that never runs the compiler."
+  (let* ((dir (make-temp-file "cljbang-cache" t))
+         (f (expand-file-name "mac.clj" dir)))
+    (unwind-protect
+        (progn
+          (write-region "(ns cachedmac)\n(defmacro dbl [x] (list '* x 2))\n" nil f nil 'quiet)
+          (cljbang-load-file-cached f)
+          (clrhash cljbang--macros)              ; forget the compile-time registration
+          (load (cljbang--cache-file f) nil t)   ; only the cache
+          (setq cljbang--current-ns nil)
+          (should (= 42 (cljbang-test--eval "(cachedmac/dbl 21)"))))
+      (delete-directory dir t)
+      (setq cljbang--current-ns nil))))
+
+
 ;;; Namespaces
 
 (ert-deftest cljbang-test-ns-interns-munged-names ()

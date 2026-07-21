@@ -62,6 +62,14 @@ Cljbang gives a better overall feeling when you move the source code to a `.clj`
 (cljbang-load-file "example.clj")
 ```
 
+For a config, use the cached loader instead. It byte-compiles the file to
+a `.elc` beside it and reuses that until you edit the source, so startup
+does not pay for the compiler:
+
+```emacs-lisp
+(cljbang-load-file-cached "example.clj")
+```
+
 Then in your `example.clj` just put this line to enable `C-x C-e` to get inline evaluation working:
 
 ```clojure
@@ -322,18 +330,16 @@ Loading:
 
 | | |
 |---|---|
-| `.clj` source, compiled on every load | 86 ms |
+| `cljbang-load-file`, compiles every time | 69 ms |
+| `cljbang-load-file-cached`, cache warm | 1.9 ms |
 | byte-compiled `.el` using `clj!` | 2.0 ms |
 | byte-compiled plain elisp | 1.0 ms |
 
 Compilation happens at macro-expansion, so a byte-compiled file has no
 cljbang left in it and loads at roughly the speed of the elisp it became.
-
-The gap is byte-compilation, not `clj!`. Uncompiled, both paths cost
-about the same: `clj!` does the same splicing and compiling that loading
-a `.clj` file does, and the file pays only about 5ms more for the reader
-pass. What the `.el` file gets and the `.clj` file does not is a cached
-`.elc`.
+`cljbang-load-file-cached` gives a `.clj` file the same treatment, so
+neither form of source is slower than the other once warm. Building the
+cache costs about 160ms, paid once per edit.
 
 Running, calling all 1000 functions once:
 
