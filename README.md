@@ -12,7 +12,7 @@ beyond `cljbang-core.el` itself.
 This project is heavily influenced by how I wrote [Squint](https://squint-cljs.github.io/squint/) and adopts its philosophy:
 
 - Embrace the host and its data structures: interop should be first class without transforming between islands
-- Light-weight: compilation happens at macro-expansion, so a byte-compiled file costs nothing at load. Uncompiled, about 70ms per 1000 defns.
+- Light-weight: compilation happens at macro-expansion, so a byte-compiled file has no extra costs at load time
 - Performance first: compiled output should run fast, in the same ballpark as elisp
 
 ![A .clj buffer in Emacs, evaluated inline](doc/screenshot.webp)
