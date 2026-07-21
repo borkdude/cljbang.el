@@ -331,9 +331,10 @@ keywords and vectors can be called as functions.
 (filter #{1 3} [1 2 3 4])   ;; => (1 3)
 ```
 
-Regex literals, which are elisp regexps rather than Java ones, so groups
-and alternation are spelled `\(` and `\|`. A backslash stands for
-itself, as it does in Clojure:
+Regex literals pass through to the host engine, as they do in Clojure,
+where `#"(a|b)"` is Java's syntax rather than Clojure's. Here the engine
+is Emacs's, so groups and alternation are spelled `\(` and `\|`. A
+backslash stands for itself:
 
 ```clojure
 (re-find #"a+" "baaac")                    ;; => "aaa"
@@ -362,7 +363,7 @@ Lisp semantics:
 (if (list) :y :n)   ;; => :n, elisp has no empty list distinct from nil
 (if [] :y :n)       ;; => :y, and 0, "" and {} are true as in Clojure
 
-#"\(a\|b\)"         ;; elisp regex syntax, where Clojure writes #"(a|b)"
+#"\(a\|b\)"         ;; the host engine's syntax, as Clojure's #"(a|b)" is Java's
 (assoc m :k 1)      ;; copies the map, so O(n)
 
 (try (f) (catch :default e e))         ;; catches anything like CLJS
