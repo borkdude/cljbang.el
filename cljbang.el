@@ -418,15 +418,82 @@ key is the pattern and the value is the map key to look up."
          (params (append (cl-loop for i from 1 to (car acc)
                                   collect (intern (format "%%%d" i)))
                          (when (cdr acc) '(& %&)))))
-    (cljbang--compile-fn (vconcat params) (list body) env)))
+    (cljbang--compile-arity (vconcat params) (list body) env)))
 
 (defun cljbang--split-docstring (rest)
-  "Split REST of a defn into (DOC PARAMS BODY), doc being optional."
+  "Split REST of a defn into (DOC TAIL), doc being optional."
   (if (stringp (car rest))
-      (list (car rest) (cadr rest) (cddr rest))
-    (list nil (car rest) (cdr rest))))
+      (list (car rest) (cdr rest))
+    (list nil rest)))
 
-(defun cljbang--compile-fn (params body env)
+(defun cljbang--fn-arities (tail)
+  "TAIL of a fn or defn as a list of (PARAMS BODY), one for each arity."
+  (cond ((vectorp (car tail)) (list (list (car tail) (cdr tail))))
+        ((null tail) (error "cljbang: a fn needs a parameter vector"))
+        (t (mapcar (lambda (arity)
+                     (unless (and (consp arity) (vectorp (car arity)))
+                       (error "cljbang: a fn arity is a vector and a body, got %S"
+                              arity))
+                     (list (car arity) (cdr arity)))
+                   tail))))
+
+(defun cljbang--compile-fn (tail env)
+  "Compile the TAIL of a fn: one parameter vector and body, or several."
+  (let ((arities (cljbang--fn-arities tail)))
+    (if (cdr arities)
+        (cljbang--compile-arities arities env)
+      (cljbang--compile-arity (caar arities) (cadar arities) env))))
+
+;; Elisp dispatches on nothing, so the arities share one &rest lambda that
+;; picks by argument count.  Each arity binds its own parameters and is its
+;; own recur target, the way each is a separate body in Clojure.
+(defun cljbang--compile-arities (arities env)
+  (let ((args (gensym "cljbang-args-"))
+        (n (gensym "cljbang-n-"))
+        clauses)
+    (dolist (arity arities)
+      (pcase-let* ((`(,params ,body) arity)
+                   (`(,test ,form) (cljbang--compile-arity-clause
+                                    params body args n env)))
+        (push (list test form) clauses)))
+    `(lambda (&rest ,args)
+       (let ((,n (length ,args)))
+         (cond ,@(nreverse clauses)
+               (t (error "cljbang: no arity takes %d argument(s)" ,n)))))))
+
+(defun cljbang--compile-arity-clause (params body args n env)
+  "A (TEST FORM) clause binding PARAMS from ARGS, whose length is N."
+  (let* ((names (append params nil))
+         (rest-at (cl-position '& names))
+         (fixed (if rest-at (cl-subseq names 0 rest-at) names))
+         (rest-param (when rest-at (nth (1+ rest-at) names)))
+         (env* env)
+         inits slots bound)
+    (cl-loop for param in fixed
+             for i from 0
+             do (let ((slot (if (symbolp param) param (gensym "cljbang--arg"))))
+                  (push (list slot `(nth ,i ,args)) inits)
+                  (push slot slots)
+                  (if (symbolp param)
+                      (push param env*)
+                    (dolist (b (cljbang--destructure param slot env*))
+                      (push b bound)
+                      (push (car b) env*)))))
+    (when rest-param
+      (let ((slot (if (symbolp rest-param) rest-param (gensym "cljbang--arg"))))
+        (push (list slot `(nthcdr ,(length fixed) ,args)) inits)
+        (push slot slots)
+        (if (symbolp rest-param)
+            (push rest-param env*)
+          (dolist (b (cljbang--destructure rest-param slot env*))
+            (push b bound)
+            (push (car b) env*)))))
+    (list (if rest-at `(>= ,n ,(length fixed)) `(= ,n ,(length fixed)))
+          `(let* ,(nreverse inits)
+             ,@(cljbang--compile-recur-body
+                (nreverse slots) (nreverse bound) body env*)))))
+
+(defun cljbang--compile-arity (params body env)
   (let ((arglist nil) (patterns nil) (env* env))
     ;; a destructuring param becomes a gensym in the arglist, unpacked by
     ;; a let* wrapped around the body
@@ -777,9 +844,9 @@ magti/status without complaining about magit/status."
                  ',name*)))
       ('defmacro
        (pcase-let* ((`(,name . ,rest) (cdr form))
-                    (`(,_doc ,params ,body) (cljbang--split-docstring rest))
+                    (`(,_doc ,tail) (cljbang--split-docstring rest))
                     (name* (cljbang--ns-intern name))
-                    (fn (cljbang--compile-fn params body env)))
+                    (fn (cljbang--compile-fn tail env)))
          ;; registered now, so the rest of this file can use it, and
          ;; emitted too, so a compiled file registers it again on load
          (cljbang--register-macro (symbol-name name) cljbang--current-ns (eval fn t))
@@ -788,16 +855,16 @@ magti/status without complaining about magit/status."
                  ',name*)))
       ((or 'defn 'defn-)
        (pcase-let* ((`(,name . ,rest) (cdr form))
-                    (`(,doc ,params ,body) (cljbang--split-docstring rest))
+                    (`(,doc ,tail) (cljbang--split-docstring rest))
                     (name* (cljbang--ns-intern name (eq (car form) 'defn-)))
-                    (fn (cljbang--compile-fn params body env)))
+                    (fn (cljbang--compile-fn tail env)))
          ;; a docstring goes where elisp keeps one, so C-h f finds it
          (when doc (setq fn `(lambda ,(cadr fn) ,doc ,@(cddr fn))))
          `(progn (defalias ',name* ,fn) ',name*)))
       ('fn
        (let ((rest (cdr form)))
          (when (symbolp (car rest)) (pop rest)) ; drop optional fn name
-         (cljbang--compile-fn (car rest) (cdr rest) env)))
+         (cljbang--compile-fn rest env)))
       ('set!
        `(setq ,(cljbang--assign-target (cadr form) env)
               ,(cljbang-compile (caddr form) env)))

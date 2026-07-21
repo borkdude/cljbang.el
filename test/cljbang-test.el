@@ -605,6 +605,45 @@ keywords."
   (should (= 100000 (cljbang-test--eval
                      "(defn f [x] (if (< x 100000) (recur (inc x)) x)) (f 0)"))))
 
+(ert-deftest cljbang-test-multiple-arities ()
+  (should (equal [:one :two]
+                 (cljbang-test--eval "(defn f ([x] :one) ([x y] :two)) [(f 1) (f 1 2)]")))
+  (should (equal [0 5 5]
+                 (cljbang-test--eval
+                  "(defn g ([] 0) ([x] x) ([x y] (+ x y))) [(g) (g 5) (g 2 3)]")))
+  (should (= 11 (cljbang-test--eval
+                 "(defn h ([x] (h x 10)) ([x y] (+ x y))) (h 1)")))
+  (should (eq :two (cljbang-test--eval "((fn ([x] :one) ([x y] :two)) 1 2)"))))
+
+(ert-deftest cljbang-test-arities-take-rest-and-destructuring ()
+  (should (equal [:one 2]
+                 (cljbang-test--eval
+                  "(defn v ([x] :one) ([x & xs] (count xs))) [(v 1) (v 1 2 3)]")))
+  (should (equal [7 [1 2]]
+                 (cljbang-test--eval
+                  "(defn d ([{:keys [a]}] a) ([a b] [a b])) [(d {:a 7}) (d 1 2)]"))))
+
+(ert-deftest cljbang-test-each-arity-is-its-own-recur-target ()
+  (should (= 5 (cljbang-test--eval
+                "(defn r ([x] (r x 0))
+                   ([x acc] (if (pos? x) (recur (dec x) (inc acc)) acc)))
+                 (r 5)"))))
+
+(ert-deftest cljbang-test-a-docstring-survives-multiple-arities ()
+  (should (equal [:one :two]
+                 (cljbang-test--eval
+                  "(defn f \"the doc\" ([x] :one) ([x y] :two)) [(f 1) (f 1 2)]"))))
+
+(ert-deftest cljbang-test-calling-an-arity-that-is-not-there ()
+  (should-error (cljbang-test--eval "(defn f ([x] :one) ([x y] :two)) (f 1 2 3)")))
+
+(ert-deftest cljbang-test-a-malformed-arity-is-rejected ()
+  "These used to compile into something that failed only when called."
+  (should-error (cljbang-test--eval "(defn f (x) :body)"))
+  (should-error (cljbang-test--eval "(defn f ([x] :one) (:not-a-vector))"))
+  (should-error (cljbang-test--eval "(defn f)"))
+  (should-error (cljbang-test--eval "(fn)")))
+
 (ert-deftest cljbang-test-a-function-without-recur-is-a-plain-lambda ()
   "The loop is only emitted when a recur asks for one."
   (should (equal '(lambda (x) (* x 2))
