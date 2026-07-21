@@ -138,7 +138,7 @@ feature of that name. `lib.some-thing` is `lib/some_thing.clj`.
 ```clojure
 (ns my.config
   ;; clj-kondo is right that :as-alias never loads, and wrong that the
-  ;; call fails, since Emacs autoloads it.  Per file, or once in
+  ;; call fails, since Emacs autoloads it. Add this per file, or once in
   ;; .clj-kondo/config.edn.
   {:clj-kondo/config '{:linters {:aliased-namespace-var-usage {:level :off}}}}
   (:require [lib.b :as b]          ;; loads lib/b.clj
