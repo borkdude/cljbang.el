@@ -142,7 +142,7 @@ A file with no `ns` can require at the top level, and so can elisp:
   (:require [lib.b :as b]          ;; loads lib/b.clj
             [magit :as m]          ;; loads the elisp feature
             [string :as s]         ;; a built-in prefix, nothing to load
-            [lib.c :as-alias c]))  ;; names it without loading
+            [org :as-alias o]))    ;; alias only, org autoloads when called
 
 (magit/status)                  ;; qualified names work the same way
 (el/magit--display-buffer buf)  ;; internal names need el/
