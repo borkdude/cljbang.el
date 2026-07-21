@@ -303,6 +303,35 @@ Host semantics win where they conflict, unless otherwise noted, like in Squint.
 - no syntax quote, so macros build their expansion with `list` and `cons`
 - no protocols and no multimethods
 
+## Benchmarks
+
+Casual, one machine, Emacs 30.2, a namespace of 1000 `defn`s. Reproduce
+with `bb bench-load` and `bb bench`.
+
+Loading:
+
+| | |
+|---|---|
+| `.clj` source, compiled on every load | 86 ms |
+| byte-compiled `.el` using `clj!` | 2.0 ms |
+| byte-compiled plain elisp | 1.0 ms |
+
+Compilation happens at macro-expansion, so a byte-compiled file has no
+cljbang left in it and loads at roughly the speed of the elisp it became.
+Loading `.clj` source pays the compiler every time, which is the mode to
+avoid if startup time matters.
+
+Running, calling all 1000 functions once:
+
+| | |
+|---|---|
+| cljbang | 0.40 ms |
+| plain elisp | 0.36 ms |
+
+Compiled output is plain elisp, so this is close to parity. Collection
+code is further off, since `map` and `filter` dispatch through a wrapper
+so a set or keyword can be used as a function, and `assoc` copies.
+
 ## Test
 
 ```
