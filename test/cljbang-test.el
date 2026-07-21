@@ -507,9 +507,34 @@ cannot take it."
                 "(defmacro my-or [a b] `(let [v# ~a] (if v# v# ~b)))
                  (let [v 5] (my-or nil v))"))))
 
-(ert-deftest cljbang-test-unquote-outside-a-syntax-quote ()
+(ert-deftest cljbang-test-unquote-without-a-matching-syntax-quote ()
   (should-error (cljbang-test--eval "~x"))
-  (should-error (cljbang-test--eval "(list ~x)")))
+  (should-error (cljbang-test--eval "(list ~x)"))
+  ;; one more unquote than quotes, as clj-kondo warns for `[~~x]
+  (should-error (cljbang-test--eval "(let [x 5] `~~x)"))
+  (should-error (cljbang-test--eval "(let [x 5] `[~~x])")))
+
+(ert-deftest cljbang-test-a-quoted-unquote-is-data ()
+  "Quoted, so never evaluated, as (quote (unquote x)) is in Clojure."
+  (should (equal '(cljbang--unquote x) (cljbang-test--eval "'~x")))
+  (should (equal '(cljbang--unquote-splicing x) (cljbang-test--eval "'~@x"))))
+
+(ert-deftest cljbang-test-quote-inside-a-syntax-quote ()
+  "The quote stays a quote and its contents are still qualified."
+  (cljbang-test--eval "(ns sqq)")
+  (should (equal ''sqq-b (cljbang-test--eval "`'b")))
+  (should (equal (list 'quote (list 'quote 'sqq-b))
+                 (cljbang-test--eval "`''b")))
+  (should (equal ''5 (cljbang-test--eval "(let [x 5] `'~x)")))
+  (cljbang--set-current-ns nil))
+
+(ert-deftest cljbang-test-the-quoted-unquote-def-idiom ()
+  "A macro hands a form over unevaluated with '~arg."
+  (should (equal '(+ 1 2)
+                 (cljbang-test--eval
+                  "(defmacro defthing [name val] `(def ~name '~val))
+                   (defthing t1 (+ 1 2))
+                   t1"))))
 
 (ert-deftest cljbang-test-syntax-quote-keeps-what-the-reader-put-there ()
   "The reader names the host function, so a template leaves it qualified."

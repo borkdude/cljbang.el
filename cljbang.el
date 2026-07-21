@@ -963,7 +963,9 @@ nothing, as it does in Clojure, and so does a name cljbang never saw."
       ('cljbang--fn-literal (cljbang--compile-fn-literal (cdr form) env))
       ('cljbang--syntax-quote (cljbang--compile-syntax-quote (cadr form) env))
       ((or 'cljbang--unquote 'cljbang--unquote-splicing)
-       (error "cljbang: %s outside of a syntax quote"
+       ;; either outside any syntax quote, or one deeper than the quotes,
+       ;; as ~~x is under a single quote
+       (error "cljbang: %s has no matching syntax quote"
               (if (eq (car form) 'cljbang--unquote) "~" "~@")))
       ('quote form)
       ('comment nil)
