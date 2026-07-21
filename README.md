@@ -245,9 +245,6 @@ Build a macro with a syntax quote, unquoting with `~` and `~@`:
 (defmacro unless [test & body]
   `(if ~test nil (do ~@body)))
 (unless false :ok)                         ;; => :ok
-
-(defmacro twice [x] `(+ ~x ~x))
-(twice 3)                                  ;; => 6
 ```
 
 A syntax quote resolves unqualified names in the macro's namespace,
@@ -259,8 +256,8 @@ including vars defined later. Use `el/` for Emacs Lisp names:
 (defn greet [x] (str "hello " x))              ;; defined after the macro
 ```
 
-A name ending in `#` is one fresh symbol per template, so a binding the
-macro introduces cannot capture one at the call site:
+A name ending in `#` is a fresh symbol, so a binding the macro introduces
+cannot capture one at the call site:
 
 ```clojure
 (defmacro my-or [a b]
@@ -268,11 +265,9 @@ macro introduces cannot capture one at the call site:
 (let [v 5] (my-or nil v))                  ;; => 5
 ```
 
-`list` and `cons` still work, and are sometimes shorter:
-
-```clojure
-(defmacro ident [x] (list 'identity x))
-```
+A `#(...)` in a template is an error, since its `%` would be qualified
+like any other name. Write `(fn [x#] ...)`. Building an expansion with
+`list` and `cons` still works.
 
 These ship as macros rather than compiler support:
 

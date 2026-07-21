@@ -536,8 +536,7 @@ reader put there, which is resolved already.")
 
 (defun cljbang--template-qualified (sym)
   "SYM with its alias expanded, still qualified.
-el/ and a name already spelled in full are left as they are, and either
-way nothing unqualified can take the place of one."
+el/ and a name already spelled in full are left alone."
   (let ((parts (split-string (symbol-name sym) "/")))
     (if (or (cljbang--el-symbol sym) (not (= (length parts) 2)))
         sym
@@ -548,27 +547,24 @@ way nothing unqualified can take the place of one."
           sym)))))
 
 (defun cljbang--template-symbol (sym)
-  "SYM as a template should carry it, qualified to the current namespace.
-A macro expands wherever it is called, so an unqualified name has to mean
-there what it meant where the macro was written.  The var need not exist
-yet, as in Clojure.  What cljbang defines itself stays bare, and el/
-carries a host name, the way Clojure leaves interop alone."
+  "SYM as a template should carry it.
+A macro expands wherever it is called, so an unqualified name is
+qualified to the namespace it was written in, whether or not the var
+exists yet.  A qualified name keeps its shape, and what cljbang defines
+resolves to what it names, so nothing at the call site can take its
+place.  Special forms are matched before anything is resolved, so they
+stay as they are."
   (let ((name (symbol-name sym)))
     (cond
      ((memq sym cljbang--template-bare) sym)
      ((member name cljbang--special-forms) sym)
-     ;; a qualified name stays qualified, with only its alias expanded, so
-     ;; it means the same thing without being flattened here
      ((string-search "/" name) (cljbang--template-qualified sym))
-     ;; the defined var wins, since it knows whether defn- spelled it private
+     ;; the defined var knows whether defn- spelled it private
      ((cljbang--ns-resolve sym))
-     ;; a core function resolves, or a var of that name where the macro
-     ;; expands would take its place.  A special form or a macro cannot be
-     ;; taken that way, being looked up before any var, so it stays as it is
+     ;; resolved, or a name of its own at the call site would take it
      ((alist-get sym cljbang--core-fns))
-     ;; a macro cljbang ships has an interned name of its own, so a macro
-     ;; of that name where this one expands cannot take its place
      ((alist-get sym cljbang--core-macros))
+     ;; a macro defined outside any namespace is already its own name
      ((cljbang--macro-function sym) sym)
      ((cljbang--current-ns)
       (intern (concat (cljbang--munge-ns (cljbang--current-ns)) "-" name)))
@@ -832,9 +828,8 @@ Returns a list of forms, looping when a recur asks for it."
 
 (defun cljbang--macro-function (sym)
   "Expander for SYM, resolved as any other name is, or nil.
-Resolved first, so a macro of the namespace shadows one cljbang ships,
-as a defn of that name shadows a core function.  The bare symbol comes
-last, which finds a macro defined outside any namespace."
+Resolving first lets a macro of the namespace shadow one cljbang ships.
+The bare symbol comes last, which finds one defined outside any namespace."
   (get (or (cljbang--resolve-name sym)
            (alist-get sym cljbang--core-macros)
            sym)
