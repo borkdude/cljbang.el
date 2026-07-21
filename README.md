@@ -61,8 +61,28 @@ el/tab-width                            ; a variable, not a function
 
 ## Supported
 
-`def` `defn` `fn` `let` `set!` `if` `when` `cond` `do` `ns` `quote` `comment`
-`->` `->>` `time` `with-out-str`
+Special forms:
+
+```
+def defn fn let set! if when cond do ns quote comment -> ->> time with-out-str
+```
+
+Functions:
+
+```
++ - * / mod = not= < > <= >= inc dec not odd? even? zero?
+first second rest nth count get contains? conj assoc
+map filter reduce str println name subs
+hash-map hash-set load-file
+```
+
+`clojure.string`, under any alias:
+
+```
+join split replace upper-case lower-case capitalize trim blank?
+```
+
+Anything not listed is an elisp call. That is the point, not a gap.
 
 Map and set literals, destructuring (sequential and associative, nested,
 in `let` and in fn params), and sets, maps, keywords and vectors called as
