@@ -587,6 +587,30 @@ keywords."
   (should-error (cljbang-test--eval "(loop [i 0] (recur 1 2))"))
   (should-error (cljbang-test--eval "(loop [i 0] ((fn [] (recur 1))))")))
 
+(ert-deftest cljbang-test-recur-must-be-in-tail-position ()
+  "Clojure refuses these, and running them would half update the loop."
+  (should-error (cljbang-test--eval "(loop [i 0] (if (< i 3) (+ 1 (recur (inc i))) i))"))
+  (should-error (cljbang-test--eval "(loop [i 0] (do (when (< i 3) (recur (inc i))) i))"))
+  (should-error (cljbang-test--eval "(loop [i 0] (if (< i 3) (let [x (recur (inc i))] x) i))"))
+  (should-error (cljbang-test--eval
+                 "(loop [i 0 acc []] (if (< i 3) (conj (recur (inc i) acc) 9) acc))")))
+
+(ert-deftest cljbang-test-recur-cannot-cross-a-try ()
+  (should-error (cljbang-test--eval
+                 "(loop [i 0] (if (< i 3) (try (recur (inc i)) (catch error e :c)) i))")))
+
+(ert-deftest cljbang-test-recur-in-tail-position-still-passes ()
+  "The check must not reject the shapes that are in tail position."
+  (should (= 3 (cljbang-test--eval "(loop [i 0] (if (< i 3) (recur (inc i)) i))")))
+  (should (= 3 (cljbang-test--eval
+                "(loop [i 0] (if (< i 3) (let [n (inc i)] (recur n)) i))")))
+  (should (= 3 (cljbang-test--eval
+                "(loop [i 0] (cond (>= i 3) i :else (recur (inc i))))")))
+  (should (= 3 (cljbang-test--eval
+                "(loop [i 0] (if (< i 3) (do :ignored (recur (inc i))) i))")))
+  (should (= 6 (cljbang-test--eval
+                "(loop [i 0 acc 0] (if (< i 4) (recur (inc i) (+ acc i)) acc))"))))
+
 (ert-deftest cljbang-test-some-threading ()
   (should (= 2 (cljbang-test--eval "(some-> 1 inc)")))
   (should (null (cljbang-test--eval "(some-> nil inc)")))

@@ -524,6 +524,8 @@ key is the pattern and the value is the map key to look up."
                   (push (car b) env*)))
     (let* ((cljbang--recur-target (list slots temps again))
            (compiled (cljbang--compile-body body env*)))
+      (cljbang--check-recur-body compiled t)
+      (setq compiled (mapcar #'cljbang--strip-recur-marks compiled))
       `(let* (,@(nreverse inits) ,@temps (,again t) (,result nil))
          (while ,again
            (setq ,again nil)
@@ -541,10 +543,53 @@ key is the pattern and the value is the map key to look up."
     (unless (= (length args) (length slots))
       (error "cljbang: recur wants %d argument(s), got %d"
              (length slots) (length args)))
-    `(progn (setq ,@(cl-loop for temp in temps for arg in args
-                             append (list temp (cljbang-compile arg env))))
-            (setq ,again t)
-            nil)))
+    ;; cljbang--recur is a mark the loop checks the position of and then
+    ;; rewrites to progn, since tail position is only known once the whole
+    ;; body is compiled and the macros in it are gone
+    `(cljbang--recur
+      (setq ,@(cl-loop for temp in temps for arg in args
+                       append (list temp (cljbang-compile arg env))))
+      (setq ,again t)
+      nil)))
+
+;; Clojure rejects a recur that is not in tail position, and cljbang would
+;; otherwise run the rest of the body with a half updated loop.  The check
+;; reads compiled elisp, where the forms that pass a value through are few
+;; and anything else, a call or a condition-case among them, is not one.
+(defun cljbang--check-recur-tails (form tail)
+  "Error when FORM holds a recur out of tail position.  TAIL if FORM is one."
+  (when (consp form)
+    (cond
+     ((eq (car form) 'quote) nil)
+     ((eq (car form) 'cljbang--recur)
+      (unless tail
+        (error "cljbang: recur is only allowed in tail position"))
+      (dolist (f (cdr form)) (cljbang--check-recur-tails f nil)))
+     ((eq (car form) 'progn)
+      (cljbang--check-recur-body (cdr form) tail))
+     ((eq (car form) 'if)
+      (cljbang--check-recur-tails (cadr form) nil)
+      (dolist (f (cddr form)) (cljbang--check-recur-tails f tail)))
+     ((memq (car form) '(let let*))
+      (dolist (binding (cadr form))
+        (when (consp binding) (cljbang--check-recur-tails (cadr binding) nil)))
+      (cljbang--check-recur-body (cddr form) tail))
+     (t (dolist (f (cdr form)) (cljbang--check-recur-tails f nil))))))
+
+(defun cljbang--check-recur-body (forms tail)
+  "Check FORMS, where only the last is in tail position when TAIL."
+  (while forms
+    (cljbang--check-recur-tails (car forms) (and tail (null (cdr forms))))
+    (setq forms (cdr forms))))
+
+(defun cljbang--strip-recur-marks (form)
+  "FORM with every recur mark rewritten to the progn it stands for."
+  (cond ((not (consp form)) form)
+        ((not (proper-list-p form)) form)
+        ((eq (car form) 'quote) form)
+        ((eq (car form) 'cljbang--recur)
+         (cons 'progn (mapcar #'cljbang--strip-recur-marks (cdr form))))
+        (t (mapcar #'cljbang--strip-recur-marks form))))
 
 (defun cljbang--thread (init forms first?)
   "Expand -> (FIRST? t) or ->> threading."
