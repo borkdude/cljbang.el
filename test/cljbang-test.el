@@ -432,6 +432,14 @@
           (should (= 2 (stale-one))))
       (delete-directory dir t))))
 
+(ert-deftest cljbang-test-cache-is-keyed-on-versions ()
+  "Upgrading Emacs or cljbang must miss the old cache, not load it."
+  (let ((name (cljbang--cache-file "/tmp/x.clj")))
+    (should (string-suffix-p (format ".%d-%s.elc" emacs-major-version cljbang-version)
+                             name))
+    (let ((cljbang-version "9.9.9"))
+      (should-not (equal name (cljbang--cache-file "/tmp/x.clj"))))))
+
 (ert-deftest cljbang-test-cached-file-registers-its-macros ()
   "A macro has to survive a load that never runs the compiler."
   (let* ((dir (make-temp-file "cljbang-cache" t))

@@ -70,6 +70,15 @@ does not pay for the compiler:
 (cljbang-load-file-cached "example.clj")
 ```
 
+The cache is named after the Emacs version and the cljbang version, as
+`example.clj.30-0.0.1.elc`, so upgrading either one misses the old cache
+and rebuilds rather than loading output the current compiler would not
+produce. Ignore them in version control:
+
+```
+*.clj.*.elc
+```
+
 Then in your `example.clj` just put this line to enable `C-x C-e` to get inline evaluation working:
 
 ```clojure

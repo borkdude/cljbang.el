@@ -1,6 +1,6 @@
 ;;; cljbang.el --- Clojure that runs as Emacs Lisp -*- lexical-binding: t; -*-
 
-;; Version: 0.1.0
+;; Version: 0.0.1
 ;; Package-Requires: ((emacs "28.1"))
 ;; Homepage: https://github.com/borkdude/cljbang
 ;; Keywords: languages, lisp
@@ -710,9 +710,15 @@ first is cheaper than building a token list for every one."
         (end-of-file (setq pos (length src))))) ; trailing comment
     (nreverse forms)))
 
+(defconst cljbang-version "0.0.1"
+  "Version of cljbang, which a compiled cache is keyed on.")
+
 (defun cljbang--cache-file (file)
-  "Name of the byte-compiled cache for FILE."
-  (concat file ".elc"))
+  "Name of the byte-compiled cache for FILE.
+The Emacs version and the cljbang version are part of the name, so
+upgrading either one misses the old cache rather than loading output
+that no longer matches the compiler that made it."
+  (format "%s.%d-%s.elc" file emacs-major-version cljbang-version))
 
 (defun cljbang-compile-file (file)
   "Byte-compile FILE, a .clj, to a .elc beside it.
@@ -724,7 +730,8 @@ again, which is what makes a .clj file as cheap to load as elisp."
          (cljbang--current-ns cljbang--current-ns)
          (cljbang--load-file-name file)
          (cljbang--load-file-dir (file-name-directory file))
-         (scratch (concat file ".el"))
+         ;; named so byte-compile-file lands on the cache name
+         (scratch (substring (cljbang--cache-file file) 0 -1))
          (compiled (mapcar #'cljbang-compile (cljbang--read-forms src))))
     (unwind-protect
         (progn
