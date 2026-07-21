@@ -536,8 +536,9 @@ key is the pattern and the value is the map key to look up."
                  gensyms))))
 
 (defconst cljbang--template-bare
-  '(& cljbang--map-literal cljbang--set-literal)
-  "Names a template leaves alone, as Clojure leaves & alone.")
+  '(& catch finally cljbang--map-literal cljbang--set-literal)
+  "Names a template leaves alone: & as Clojure leaves it, and the clause
+heads of try, which are syntax rather than names of their own.")
 
 (defun cljbang--template-qualified (sym)
   "SYM with its alias expanded, still qualified.
@@ -1110,6 +1111,38 @@ a match followed by that character, which is how ~ leaves ~@ alone."
             (goto-char end)))))
     edits))
 
+(defun cljbang--regex-body (body)
+  "BODY of a regex literal, with the backslashes the reader eats put back.
+A backslash stands for itself in a regex literal, as it does in Clojure,
+so \\( is a group rather than a plain paren.  An escaped quote is left
+alone, since the reader has to take that one away."
+  (let ((out "") (i 0) (n (length body)))
+    (while (< i n)
+      (let ((c (aref body i)))
+        (cond ((and (eq c ?\\) (< (1+ i) n) (eq (aref body (1+ i)) ?\"))
+               (setq out (concat out "\\\"") i (+ i 2)))
+              ((eq c ?\\)
+               (setq out (concat out "\\\\") i (1+ i)))
+              (t (setq out (concat out (char-to-string c))) (setq i (1+ i))))))
+    out))
+
+(defun cljbang--regex-edits (edits)
+  "Add edits to EDITS turning each regex literal into a call."
+  (goto-char (point-min))
+  (while (search-forward "#\"" nil t)
+    (let ((beg (match-beginning 0)))
+      (when (cljbang--code-position-p beg)
+        (goto-char (1+ beg))
+        (when-let* ((end (ignore-errors (save-excursion (forward-sexp) (point)))))
+          (push (list beg (- end beg)
+                      (concat "(el/cljbang-re-pattern \""
+                              (cljbang--regex-body
+                               (buffer-substring-no-properties (+ beg 2) (1- end)))
+                              "\")"))
+                edits)
+          (goto-char end)))))
+  edits)
+
 (defun cljbang--rewrite-dispatch (s)
   "Rewrite the reader macros in S to forms the elisp reader accepts.
 Occurrences inside a string or a comment are left alone.  Needs the
@@ -1141,7 +1174,7 @@ source text, so it applies to files and inline evaluation but not to
       ;; ~@ goes before ~, so the longer one wins the shared tilde.
       ;; el/ so that what the reader emits reaches the host function even
       ;; where a var of that name is defined
-      (setq edits (cljbang--wrap-next-sexp "#\"" "(el/cljbang-re-pattern \"" edits 1))
+      (setq edits (cljbang--regex-edits edits))
       (setq edits (cljbang--wrap-next-sexp "`" "(cljbang--syntax-quote " edits))
       (setq edits (cljbang--wrap-next-sexp "~@" "(cljbang--unquote-splicing " edits))
       (setq edits (cljbang--wrap-next-sexp "~" "(cljbang--unquote " edits nil nil ?@))

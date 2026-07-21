@@ -182,7 +182,20 @@ keywords."
   (should (null (cljbang-test--eval "(re-find #\"z\" \"abc\")")))
   ;; groups come back as a vector, whole match first
   (should (equal ["aab" "aa" "b"]
-                 (cljbang-test--eval "(re-find #\"\\\\(a+\\\\)\\\\(b\\\\)\" \"xaab\")"))))
+                 (cljbang-test--eval "(re-find #\"\\(a+\\)\\(b\\)\" \"xaab\")"))))
+
+(ert-deftest cljbang-test-regex-literal-keeps-its-backslashes ()
+  "A backslash stands for itself, as it does in a Clojure regex literal."
+  (should (equal ["b" "b"] (cljbang-test--eval "(re-find #\"\\(a\\|b\\)\" \"xbx\")")))
+  (should (equal ["foo-42" "foo" "42"]
+                 (cljbang-test--eval
+                  "(re-find #\"\\(foo\\)-\\([0-9]+\\)\" \"id foo-42 end\")")))
+  (should (equal "word" (cljbang-test--eval "(re-find #\"\\bword\\b\" \"a word here\")"))))
+
+(ert-deftest cljbang-test-regex-literal-escapes ()
+  "An escaped quote is the reader's, a doubled backslash is the regex's."
+  (should (equal "\"" (cljbang-test--eval "(re-find #\"\\\"\" \"say \\\"hi\\\"\")")))
+  (should (equal "\\" (cljbang-test--eval "(re-find #\"\\\\\" \"back\\\\slash\")"))))
 
 (ert-deftest cljbang-test-re-matches ()
   (should (equal "aaa" (cljbang-test--eval "(re-matches #\"a+\" \"aaa\")")))
@@ -839,6 +852,24 @@ cannot take it."
   (should (eq :caught (cljbang-test--eval
                        "(try (el/insert-file-contents \"/no/such\")
                           (catch file-missing e :caught))"))))
+
+(ert-deftest cljbang-test-try-survives-a-syntax-quote ()
+  "catch and finally are syntax, so a template must not qualify them."
+  (cljbang-test--eval "(ns tryq)")
+  (should (equal '(try (tryq-f) (catch el/file-missing tryq-e tryq-e) (finally 1))
+                 (cljbang-test--eval
+                  "`(try (f) (catch el/file-missing e e) (finally 1))")))
+  (cljbang--set-current-ns nil))
+
+(ert-deftest cljbang-test-a-catch-tag-in-a-macro-needs-el ()
+  "An unqualified tag would be qualified like any other name."
+  (should (eq :missing (cljbang-test--eval
+                        "(ns mactry)
+                         (defmacro slurp [p]
+                           `(try (el/insert-file-contents ~p)
+                                 (catch el/file-missing e# :missing)))
+                         (slurp \"/no/such/file\")")))
+  (cljbang--set-current-ns nil))
 
 (ert-deftest cljbang-test-catch-warns-on-a-clause-that-never-matches ()
   (let (warnings)

@@ -331,11 +331,14 @@ keywords and vectors can be called as functions.
 ```
 
 Regex literals, which are elisp regexps rather than Java ones, so groups
-and alternation are spelled `\\(` and `\\|`:
+and alternation are spelled `\(` and `\|`. A backslash stands for
+itself, as it does in Clojure:
 
 ```clojure
 (re-find #"a+" "baaac")                    ;; => "aaa"
 (re-seq #"a." "abac")                      ;; => ("ab" "ac")
+(re-find #"\(a\|b\)" "xbx")               ;; => ["b" "b"], a group and an
+                                           ;;    alternation
 (str/replace "a1b2" #"[0-9]" "#")          ;; => "a#b#"
 (str/replace "a.b" "." "!")                ;; => "a!b", a string match is literal
 ```
@@ -358,7 +361,7 @@ Lisp semantics:
 (if (list) :y :n)   ;; => :n, elisp has no empty list distinct from nil
 (if [] :y :n)       ;; => :y, and 0, "" and {} are true as in Clojure
 
-#"\\(a\\|b\\)"       ;; elisp regex syntax, where Clojure writes #"(a|b)"
+#"\(a\|b\)"         ;; elisp regex syntax, where Clojure writes #"(a|b)"
 (assoc m :k 1)      ;; copies the map, so O(n)
 
 (try (f) (catch :default e e))         ;; catches anything like CLJS
