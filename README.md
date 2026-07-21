@@ -15,6 +15,8 @@ This project is heavily influenced by how I wrote [Squint](https://squint-cljs.g
 - Light-weight: compilation happens at macro-expansion, so a byte-compiled file costs nothing at load. Uncompiled, about 70ms per 1000 defns.
 - Performance first: compiled output should run fast, in the same ballpark as elisp
 
+![A .clj buffer in Emacs, evaluated inline](doc/screenshot.webp)
+
 Which buffers are visiting a file that is no longer there?
 
 ```clojure
