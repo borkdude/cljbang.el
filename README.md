@@ -242,6 +242,18 @@ Build a macro with a syntax quote, unquoting with `~` and `~@`:
 (twice 3)                                  ;; => 6
 ```
 
+An unqualified name is qualified to the namespace where the macro is
+written, not where it expands, so a macro can call its own namespace's
+functions from anywhere. The var does not have to exist yet. What cljbang
+defines itself stays as it is, so `if`, `let`, `map` and `when` need
+nothing, and a host name takes `el/`:
+
+```clojure
+(ns my.config)
+(defmacro shout [x] `(el/upcase (greet ~x)))   ;; greet is my-config-greet
+(defn greet [x] (str "hello " x))              ;; defined after the macro
+```
+
 A name ending in `#` is one fresh symbol per template, so a binding the
 macro introduces cannot capture one at the call site:
 
@@ -355,9 +367,9 @@ Lisp semantics:
 (into {} [[:a 1]])     ;; an error. A map and a set are both hash tables,
                        ;;    so conj cannot tell assoc from adding the pair
 (symbol? :a)           ;; => nil, a keyword is a symbol in elisp, not here
-`(a ~x)                ;; => (a 1), a syntax quote leaves symbols bare where
-                       ;;    Clojure qualifies them. Use x# for a local, since
-                       ;;    a bare name can capture one at the call site
+`(el/message "hi")     ;; a syntax quote qualifies to the namespace, as Clojure
+                       ;;    does, so a host name needs el/ the way Clojure
+                       ;;    needs .method
 
 (get '((:a . 1)) :a)   ;; => 1, an alist reads as a map
 (get '((1 2) (3 4)) 1) ;; => (2), and so does a list of lists. Clojure

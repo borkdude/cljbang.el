@@ -537,6 +537,28 @@ key is the pattern and the value is the map key to look up."
                  (gensym (concat (substring name 0 -1) "-"))
                  gensyms))))
 
+(defconst cljbang--template-bare '(& % %1 %2 %3 %4 %&)
+  "Names a template leaves alone, being parameter syntax rather than vars.")
+
+(defun cljbang--template-symbol (sym)
+  "SYM as a template should carry it, qualified to the current namespace.
+A macro expands wherever it is called, so an unqualified name has to mean
+there what it meant where the macro was written.  The var need not exist
+yet, as in Clojure.  What cljbang defines itself stays bare, and el/
+carries a host name, the way Clojure leaves interop alone."
+  (let ((name (symbol-name sym)))
+    (cond
+     ((memq sym cljbang--template-bare) sym)
+     ((member name cljbang--special-forms) sym)
+     ((string-search "/" name) (or (ignore-errors (cljbang--qualified sym)) sym))
+     ;; the defined var wins, since it knows whether defn- spelled it private
+     ((cljbang--ns-resolve sym))
+     ((alist-get sym cljbang--core-fns) sym)
+     ((cljbang--macro-function sym) sym)
+     ((cljbang--current-ns)
+      (intern (concat (cljbang--munge-ns (cljbang--current-ns)) "-" name)))
+     (t sym))))
+
 (defun cljbang--template (form gensyms)
   "Cljbang form that builds FORM, honouring unquote.  GENSYMS holds x# names."
   (when (and (consp form) (memq (car form) '(\` \, \,@ cljbang--syntax-quote)))
@@ -551,7 +573,7 @@ key is the pattern and the value is the map key to look up."
            ((memq form '(t true false)) form)
            ((string-suffix-p "#" (symbol-name form))
             (list 'quote (cljbang--auto-gensym form gensyms)))
-           (t (list 'quote form))))
+           (t (list 'quote (cljbang--template-symbol form)))))
     ((pred vectorp)
      (list 'vec (cljbang--template-seq (append form nil) gensyms)))
     (`(cljbang--map-literal . ,kvs)
