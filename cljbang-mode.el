@@ -75,7 +75,7 @@ Elsewhere falls back to `eval-last-sexp'."
       (let* ((beg (save-excursion (backward-sexp) (point)))
              ;; heed the nearest preceding (ns ...) form in the buffer
              (cljbang--current-ns (or (cljbang--buffer-ns) cljbang--current-ns))
-             (val (cljbang--pr-str
+             (val (cljbang-pr-str
                    (cljbang-eval-string
                     (buffer-substring-no-properties beg (point))))))
         (cljbang--show-result val (point))

@@ -255,7 +255,7 @@ Functions:
 ```
 + - * / mod = not= < > <= >= inc dec not odd? even? zero?
 first second rest nth count get contains? conj assoc
-map filter reduce str println name subs
+map filter reduce str pr-str println prn name subs
 hash-map hash-set load-file
 ```
 

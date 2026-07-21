@@ -147,27 +147,45 @@ Strings are not, and nil is not, so (= [] nil) stays false as in Clojure."
        (or (null more)
            (apply #'cljbang-= b more))))
 
-(defun cljbang--pr-str (x)
-  (cond ((null x) "nil")
-        ((eq x t) "true")
-        ((stringp x) x)
-        ((hash-table-p x)
-         (let (pairs)
-           (maphash (lambda (k v)
-                      (push (concat (cljbang--pr-str k) " " (cljbang--pr-str v)) pairs))
-                    x)
-           (concat "{" (string-join (nreverse pairs) ", ") "}")))
-        ((vectorp x)
-         (concat "[" (mapconcat #'cljbang--pr-str x " ") "]"))
-        ((proper-list-p x)
-         (concat "(" (mapconcat #'cljbang--pr-str x " ") ")"))
-        (t (format "%s" x))))
+(defun cljbang--print (x readably)
+  "Print X.  READABLY quotes strings, the difference between pr-str and str."
+  (let ((rec (lambda (v) (cljbang--print v readably))))
+    (cond ((null x) "nil")
+          ((eq x t) "true")
+          ((stringp x) (if readably (prin1-to-string x) x))
+          ((hash-table-p x)
+           (let (pairs)
+             (maphash (lambda (k v)
+                        (push (concat (funcall rec k) " " (funcall rec v)) pairs))
+                      x)
+             (concat "{" (string-join (nreverse pairs) ", ") "}")))
+          ((vectorp x)
+           (concat "[" (mapconcat rec x " ") "]"))
+          ((proper-list-p x)
+           (concat "(" (mapconcat rec x " ") ")"))
+          (t (format "%s" x)))))
+
+(defun cljbang-pr-str (&rest xs)
+  "Print XS readably, so a string comes back with its quotes."
+  (mapconcat (lambda (x) (cljbang--print x t)) xs " "))
 
 (defun cljbang-str (&rest xs)
-  (mapconcat (lambda (x) (if (null x) "" (cljbang--pr-str x))) xs ""))
+  "Concatenate XS.  A string argument is itself, but one nested in a
+collection keeps its quotes, which is what Clojure's str does."
+  (mapconcat (lambda (x)
+               (cond ((null x) "")
+                     ((stringp x) x)
+                     (t (cljbang--print x t))))
+             xs ""))
 
 (defun cljbang-println (&rest xs)
-  (princ (mapconcat #'cljbang--pr-str xs " "))
+  (princ (mapconcat (lambda (x) (cljbang--print x nil)) xs " "))
+  (princ "\n")
+  nil)
+
+(defun cljbang-prn (&rest xs)
+  "Like println, but readably, so a string keeps its quotes."
+  (princ (apply #'cljbang-pr-str xs))
   (princ "\n")
   nil)
 

@@ -291,7 +291,31 @@
 
 (ert-deftest cljbang-test-str ()
   (should (equal "ab" (cljbang-test--eval "(str \"a\" \"b\")")))
-  (should (equal "" (cljbang-test--eval "(str nil)"))))
+  (should (equal "" (cljbang-test--eval "(str nil)")))
+  (should (equal "1" (cljbang-test--eval "(str 1)"))))
+
+(ert-deftest cljbang-test-str-quotes-nested-strings ()
+  "Clojure's str leaves a top-level string bare and quotes nested ones."
+  (should (equal "a" (cljbang-test--eval "(str \"a\")")))
+  (should (equal "[1 \"b\"]" (cljbang-test--eval "(str [1 \"b\"])")))
+  (should (equal "{:a \"x\"}" (cljbang-test--eval "(str {:a \"x\"})"))))
+
+(ert-deftest cljbang-test-pr-str ()
+  (should (equal "\"a\"" (cljbang-test--eval "(pr-str \"a\")")))
+  (should (equal "[1 \"b\" :c]" (cljbang-test--eval "(pr-str [1 \"b\" :c])")))
+  (should (equal "{:a \"x\"}" (cljbang-test--eval "(pr-str {:a \"x\"})")))
+  (should (equal "nil" (cljbang-test--eval "(pr-str nil)")))
+  (should (equal "1 2" (cljbang-test--eval "(pr-str 1 2)"))))
+
+(ert-deftest cljbang-test-inline-eval-prints-readably ()
+  "The overlay is REPL output, so a string shows its quotes."
+  (with-temp-buffer
+    (setq-local cljbang-whole-buffer t)
+    (insert "[1 \"b\" :c]")
+    (cljbang-eval-last-sexp)
+    (should (string-match-p "\\[1 \"b\" :c\\]"
+                            (overlay-get (car cljbang--result-overlays)
+                                         'after-string)))))
 
 
 ;;; Sets, maps, keywords and vectors as functions

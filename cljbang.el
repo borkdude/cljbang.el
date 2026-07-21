@@ -39,6 +39,7 @@
     (first . cljbang-first) (second . cljbang-second) (rest . cljbang-rest)
     (map . cljbang-map) (filter . cljbang-filter) (reduce . cljbang-reduce)
     (str . cljbang-str) (println . cljbang-println)
+    (pr-str . cljbang-pr-str) (prn . cljbang-prn)
     (get . cljbang-get) (count . cljbang-count)
     (nth . cljbang-nth) (name . cljbang-name)
     (conj . cljbang-conj) (hash-map . cljbang-hash-map)
