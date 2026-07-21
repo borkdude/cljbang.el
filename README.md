@@ -6,10 +6,11 @@ Cljbang (`clj!`) compiles Clojure forms to Emacs Lisp forms and evaluates them i
 running Emacs. There is no subprocess, no transpiled text, and no runtime
 beyond `cljbang.el` itself.
 
-This project is heavily influenced by how I wrote [squint](https://squint-cljs.github.io/squint/) and adopts its philosophy:
+This project is heavily influenced by how I wrote [squint](https://squint-cljs.github.io/squint/) and adopts its philosophy to writing a Clojure-like:
 
-- Host and its data structures first: interop should be dead easy without transforming between islands
-- Performance first
+- Host and its data structures are embraced: interop should be dead easy without transforming between islands
+- Light-weight: the compiler step should be fast such that using cljbang doesn't incur a lot of overhead compared to using elisp directly.
+- Performance first: compiled output should run fast, in the same ballpark as elisp
 
 ## Install
 
@@ -20,9 +21,9 @@ Requires Emacs 28.1 or later.
   :vc (:url "https://github.com/borkdude/cljbang"))
 ```
 
-## Use
+## Usage
 
-Clojure inside an elisp buffer, compiled at macro-expansion time:
+You can use the `clj!` macro directly in side of en elisp buffer:
 
 ```emacs-lisp
 (clj! (defn winner [{:keys [alice bob]}]
@@ -32,17 +33,67 @@ Clojure inside an elisp buffer, compiled at macro-expansion time:
 ;; => :bob
 ```
 
-A whole file:
+This defines a function straight into your elisp file.
+
+Cljbang gives a better overall feeling when you move the source code to a `.clj` file and then load that file with:
 
 ```emacs-lisp
-(cljbang-load-file "config.clj")
+(cljbang-load-file "example.clj")
 ```
 
-Form by form, with the result in an overlay. Bind `cljbang-eval-last-sexp`
-in `cljbang-mode`, or put this on the first line of a `.clj` file:
+Then in your `example.clj` just put this line to enable `C-x C-e` to get inline evaluation working:
 
 ```clojure
 ;; -*- mode: clojure; cljbang-whole-buffer: t -*-
+```
+
+### Where the definitions go
+
+`defn` and `def` intern real elisp symbols, so anything the file defines is
+callable from elisp afterwards. Without an `ns` form the name is used as is:
+
+```clojure
+;; example.clj
+(defn greet [x] (str "hi " x))
+(def answer 42)
+```
+
+```emacs-lisp
+(cljbang-load-file "example.clj")
+(greet "you")   ;; => "hi you"
+answer          ;; => 42
+```
+
+An `ns` form prefixes them instead. Dots become dashes, then `--` joins the
+name, which is the usual elisp convention for a package-private symbol:
+
+```clojure
+;; my_config.clj
+(ns my.config)
+(defn greet [x] (str "hello " x))
+(def answer 7)
+```
+
+```emacs-lisp
+(cljbang-load-file "my_config.clj")
+(my-config--greet "you")   ;; => "hello you"
+my-config--answer          ;; => 7
+```
+
+From Clojure, reach them with the namespace:
+
+```clojure
+(my.config/greet "you")   ;; => "hello you"
+```
+
+The `ns` is in effect only while the file loads, so it does not leak into
+whatever you evaluate next.
+
+The same munging works in reverse, which is how interop with elisp packages
+that use `--` reads naturally:
+
+```clojure
+(mylib/frob x)   ;; calls the elisp function mylib--frob
 ```
 
 ## Interop
