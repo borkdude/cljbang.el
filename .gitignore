@@ -1,2 +1,5 @@
 *.elc
 .clj-kondo/.cache/
+
+# personal scratch
+my_test_file.clj
