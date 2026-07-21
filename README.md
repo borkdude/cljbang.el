@@ -2,7 +2,7 @@
 
 A Clojure-like language that runs as Emacs Lisp.
 
-> **WARNING**: I'm not sure if any of this is a good idea, but it kinda
+> ⚠️ **WARNING**: I'm not sure if any of this is a good idea, but it kinda
 > works for me.
 
 Cljbang (`clj!`) compiles Clojure forms to Emacs Lisp forms and evaluates them in the
@@ -207,13 +207,48 @@ def defn defn- defmacro fn let set! if when cond do ns quote comment
 ```
 
 Clojure calls only a handful of those special forms and defines the rest
-as macros. Cljbang knows them all, for now. `defmacro` works, with the
-expansion built by hand since there is no syntax quote yet:
+as macros. Cljbang knows them all, for now.
+
+### Macros
+
+`defmacro` works. Build the expansion by hand, with `list` and `cons`:
 
 ```clojure
 (defmacro twice [x] (list '+ x x))
-(twice 3)     ;; => 6
+(twice 3)                                  ;; => 6
+
+(defmacro unless-neg [n body]
+  (list 'if (list '< n 0) nil body))
+(unless-neg 5 :ok)                         ;; => :ok
 ```
+
+A macro is registered while compiling, so a form further down the same
+file can use it. Expansion happens before the arguments are compiled,
+which is the point of one. A `let` binding of the same name shadows it.
+
+### Syntax quote is missing
+
+⚠️ The gap that makes macros awkward. Cljbang reads Clojure with the
+elisp reader, and the reader disagrees about every part of syntax quote:
+
+| written | what actually happens |
+|---|---|
+| `` `(+ 1 2) `` | works, it is elisp's backquote |
+| `` `(+ ,x 1) `` | **the unquote is silently dropped**, you get the symbol `x` |
+| `~x` | reads as a symbol named `~x`, and does nothing |
+| `~@xs` | likewise, a symbol |
+| `x#` | reads as `x`, so an auto-gensym collides instead of being unique |
+
+The second row is the dangerous one. Commas are whitespace in Clojure,
+so cljbang strips them before the compiler runs, and that takes elisp's
+`,` unquote with it. A backquote that looks like it interpolates quietly
+does not:
+
+```clojure
+(let [x 5] `(+ ,x 1))     ;; => (+ x 1), not (+ 5 1)
+```
+
+Until this is fixed, build expansions with `list` and `cons`.
 
 Functions:
 
@@ -265,6 +300,8 @@ Host semantics win where they conflict, unless otherwise noted, like in Squint.
 - `#{...}` and `#(...)` need source text and so do not work inside `clj!`.
   Use `hash-set` and `fn` there, or move your source to a `.clj` file.
 - `:strs`, `:syms` and namespaced `:keys` are not implemented
+- no syntax quote, so macros build their expansion with `list` and `cons`
+- no protocols and no multimethods
 
 ## Test
 
