@@ -1330,6 +1330,33 @@ cannot take it."
       (cljbang--set-current-ns nil))))
 
 
+(ert-deftest cljbang-test-a-cached-file-uses-a-macro-from-another ()
+  "The use is expanded when the file is compiled, and the macro is
+registered again when the cache loads."
+  (let ((dir (make-temp-file "cljbang-aot" t)))
+    (unwind-protect
+        (let ((cljbang-load-path (list dir)))
+          (write-region (concat "(ns aotlib)\n"
+                                "(defmacro dbl [x] `(* ~x 2))\n"
+                                "(defn plain [x] (dbl x))\n")
+                        nil (expand-file-name "aotlib.clj" dir) nil 'quiet)
+          (write-region (concat "(ns aotuser (:require [aotlib :as a]))\n"
+                                "(defn go [] [(a/dbl 21) (aotlib/plain 5)])\n")
+                        nil (expand-file-name "aotuser.clj" dir) nil 'quiet)
+          (cljbang-load-file (expand-file-name "aotlib.clj" dir))
+          (cljbang--set-current-ns nil)
+          (cljbang-load-file (expand-file-name "aotuser.clj" dir))
+          (should (equal [42 10] (aotuser-go)))
+          ;; forget the macro, then load only the caches
+          (remhash "dbl" (cljbang--ns-macro-table "aotlib"))
+          (load (cljbang--cache-file (expand-file-name "aotlib.clj" dir)) nil t)
+          (load (cljbang--cache-file (expand-file-name "aotuser.clj" dir)) nil t)
+          (cljbang--set-current-ns nil)
+          (should (equal [42 10] (aotuser-go)))
+          (should (gethash "dbl" (cljbang--ns-macro-table "aotlib"))))
+      (delete-directory dir t)
+      (cljbang--set-current-ns nil))))
+
 (ert-deftest cljbang-test-clojure-string ()
   "Checked against Clojure, including the argument orders elisp reverses."
   (should (cljbang-test--eval "(str/includes? \"hello\" \"ell\")"))
