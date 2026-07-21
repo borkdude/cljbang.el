@@ -632,8 +632,22 @@ it applies to files and inline evaluation but not to `clj!'."
     (cljbang--lex-braces (symbol-name form)))
    (t (list form))))
 
+(defun cljbang--needs-splice-p (form)
+  "Whether FORM holds a brace or a comma, so the splicing pass has work.
+Most forms hold neither, and this walk allocates nothing, so checking
+first is cheaper than building a token list for every one."
+  (cond ((and form (symbolp form))
+         (let ((name (symbol-name form)))
+           (or (string-search "{" name) (string-search "}" name))))
+        ((vectorp form) (seq-some #'cljbang--needs-splice-p form))
+        ((consp form) (or (eq (car form) '\,)
+                          (cljbang--needs-splice-p (car form))
+                          (cljbang--needs-splice-p (cdr form))))
+        (t nil)))
+
 (defun cljbang--splice-form (form)
-  (cond ((vectorp form) (apply #'vector (cljbang--splice-braces (append form nil))))
+  (cond ((not (cljbang--needs-splice-p form)) form)
+        ((vectorp form) (apply #'vector (cljbang--splice-braces (append form nil))))
         ;; a dotted pair is quoted elisp data, such as an alist.  Braces
         ;; cannot span the dot, so recurse on both sides
         ((and (consp form) (not (proper-list-p form)))
@@ -643,6 +657,12 @@ it applies to files and inline evaluation but not to `clj!'."
 
 (defun cljbang--splice-braces (forms)
   "Reduce { } tokens in FORMS into map and set literal forms."
+  (if (not (seq-some #'cljbang--needs-splice-p forms))
+      forms
+    (cljbang--splice-braces-1 forms)))
+
+(defun cljbang--splice-braces-1 (forms)
+  "Do the splicing that `cljbang--splice-braces' decided is needed."
   (let ((stack (list nil)) kinds)
     (dolist (tok (mapcan #'cljbang--brace-tokens forms))
       (cond

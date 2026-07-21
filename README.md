@@ -328,8 +328,12 @@ Loading:
 
 Compilation happens at macro-expansion, so a byte-compiled file has no
 cljbang left in it and loads at roughly the speed of the elisp it became.
-Loading `.clj` source pays the compiler every time, which is the mode to
-avoid if startup time matters.
+
+The gap is byte-compilation, not `clj!`. Uncompiled, both paths cost
+about the same: `clj!` does the same splicing and compiling that loading
+a `.clj` file does, and the file pays only about 5ms more for the reader
+pass. What the `.el` file gets and the `.clj` file does not is a cached
+`.elc`.
 
 Running, calling all 1000 functions once:
 
@@ -345,8 +349,7 @@ so a set or keyword can be used as a function, and `assoc` copies.
 In practice cljbang incurs little overhead. A byte-compiled file costs
 about a millisecond more to load than the elisp it became, and runs
 within about ten percent of it. For configuration code that is not
-something you will notice. The case to avoid is loading `.clj` source at
-startup, where the compiler runs every time.
+something you will notice.
 
 ## Test
 
