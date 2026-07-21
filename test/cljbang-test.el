@@ -371,16 +371,41 @@ keywords."
   (should (eq 'sqlater-not-yet (cljbang-test--eval "`not-yet")))
   (cljbang--set-current-ns nil))
 
-(ert-deftest cljbang-test-syntax-quote-leaves-cljbang-names-bare ()
-  "What cljbang defines itself is not a var of the namespace."
+(ert-deftest cljbang-test-syntax-quote-leaves-forms-and-macros-bare ()
+  "A special form and a macro are looked up before any var, so neither
+can be taken by a var of that name where the macro expands."
   (cljbang-test--eval "(ns sqbare)")
   (should (equal '(if a b) (cljbang-test--eval "`(if ~'a ~'b)")))
-  (should (eq 'map (cljbang-test--eval "`map")))
   (should (eq 'when (cljbang-test--eval "`when")))
   (should (eq 'let (cljbang-test--eval "`let")))
-  (should (equal '(fn [x] x)
-                 (cljbang-test--eval "`(fn [~'x] ~'x)")))
+  (should (equal '(fn [x] x) (cljbang-test--eval "`(fn [~'x] ~'x)")))
   (cljbang--set-current-ns nil))
+
+(ert-deftest cljbang-test-syntax-quote-resolves-a-core-function ()
+  "A var of that name where the macro expands would otherwise take it."
+  (cljbang-test--eval "(ns sqcore)")
+  (should (eq '1+ (cljbang-test--eval "`inc")))
+  (should (eq 'cljbang-map (cljbang-test--eval "`map")))
+  (should (eq 'cljbang-str (cljbang-test--eval "`str")))
+  (should (equal '(cljbang-map 1+ [1]) (cljbang-test--eval "`(map inc [1])")))
+  (cljbang--set-current-ns nil))
+
+(ert-deftest cljbang-test-a-core-function-in-a-macro-is-not-captured ()
+  (let ((dir (make-temp-file "cljbang-cap" t)))
+    (unwind-protect
+        (let ((cljbang-load-path (list dir)))
+          (write-region "(ns caplib)\n(defmacro capbump [x] `(inc ~x))\n"
+                        nil (expand-file-name "caplib.clj" dir) nil 'quiet)
+          (write-region (concat "(ns capuser (:require [caplib :as c]))\n"
+                                "(defn inc [n] :captured)\n"
+                                "(defn go [] (c/capbump 1))\n")
+                        nil (expand-file-name "capuser.clj" dir) nil 'quiet)
+          (cljbang-load-file (expand-file-name "caplib.clj" dir))
+          (cljbang--set-current-ns nil)
+          (cljbang-load-file (expand-file-name "capuser.clj" dir))
+          (should (= 2 (capuser-go))))
+      (delete-directory dir t)
+      (cljbang--set-current-ns nil))))
 
 (ert-deftest cljbang-test-syntax-quote-keeps-parameter-syntax ()
   (cljbang-test--eval "(ns sqamp)")

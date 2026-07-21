@@ -553,7 +553,10 @@ carries a host name, the way Clojure leaves interop alone."
      ((string-search "/" name) (or (ignore-errors (cljbang--qualified sym)) sym))
      ;; the defined var wins, since it knows whether defn- spelled it private
      ((cljbang--ns-resolve sym))
-     ((alist-get sym cljbang--core-fns) sym)
+     ;; a core function resolves, or a var of that name where the macro
+     ;; expands would take its place.  A special form or a macro cannot be
+     ;; taken that way, being looked up before any var, so it stays as it is
+     ((alist-get sym cljbang--core-fns))
      ((cljbang--macro-function sym) sym)
      ((cljbang--current-ns)
       (intern (concat (cljbang--munge-ns (cljbang--current-ns)) "-" name)))
