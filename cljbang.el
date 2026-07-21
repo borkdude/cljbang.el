@@ -50,6 +50,7 @@
     (subs . cljbang-subs) (throw . cljbang-throw)
     (ex-info . cljbang-ex-info) (ex-message . cljbang-ex-message)
     (ex-data . cljbang-ex-data) (ex-cause . cljbang-ex-cause)
+    (list . list)
     (seq . cljbang-seq) (vec . cljbang-vec) (set . cljbang-set)
     (mapv . cljbang-mapv)
     (mapcat . cljbang-mapcat) (into . cljbang-into) (range . cljbang-range)
@@ -574,15 +575,31 @@ stay as they are."
      ((alist-get sym cljbang--core-macros))
      ;; a macro defined outside any namespace is already its own name
      ((cljbang--macro-function sym) sym)
+     ;; a name the compiler made, met again when a nested syntax quote
+     ;; walks build code, is already what it should be
+     ((or (rassq sym cljbang--core-fns)
+          (rassq sym cljbang--core-macros)
+          (cljbang--interned-as sym)
+          (not (intern-soft name)))
+      sym)
      ((cljbang--current-ns)
-      (intern (concat (cljbang--munge-ns (cljbang--current-ns)) "-" name)))
+      (let ((prefix (concat (cljbang--munge-ns (cljbang--current-ns)) "-")))
+        (if (string-prefix-p prefix name)
+            sym
+          (intern (concat prefix name)))))
      (t sym))))
 
 (defun cljbang--template (form gensyms)
   "Cljbang form that builds FORM, honouring unquote.  GENSYMS holds x# names."
-  (when (and (consp form) (memq (car form) '(\` \, \,@ cljbang--syntax-quote)))
-    (error "cljbang: a nested syntax quote is not supported"))
+  (when (and (consp form) (memq (car form) '(\` \, \,@)))
+    (error "cljbang: ` and ~ need source text, so they do not work inside clj!"))
   (pcase form
+    ;; innermost first, as Clojure reads it: the inner template expands,
+    ;; and the outer one builds that expansion as data
+    (`(cljbang--syntax-quote ,inner)
+     (cljbang--template
+      (cljbang--template inner (make-hash-table :test #'equal))
+      gensyms))
     (`(cljbang--unquote ,x) x)
     (`(cljbang--unquote-splicing ,_)
      (error "cljbang: ~@ only makes sense inside a collection"))
@@ -1100,17 +1117,18 @@ a match followed by that character, which is how ~ leaves ~@ alone."
                              (eq (char-after (+ beg (length prefix))) not-before)))
                    (or (not token-start)
                        (= beg (point-min))
-                       ;; a quote opens a token as readily as a delimiter
-                       ;; does, which is what `@x needs.  Not ~, whose @
-                       ;; belongs to the splice that was matched already
+                       ;; a quote or another @ opens a token as readily as
+                       ;; a delimiter does, which is what `@x and @@x need.
+                       ;; Not ~, whose @ belongs to the splice matched already
                        (memq (char-before beg)
-                             '(?\s ?\t ?\n ?\( ?\[ ?{ ?` ?\'))))
+                             '(?\s ?\t ?\n ?\( ?\[ ?{ ?` ?\' ?@))))
           (goto-char (+ beg skip))
           (when-let* ((end (ignore-errors
                              (save-excursion (forward-sexp) (point)))))
             (push (list end 0 ")") edits)
             (push (list beg (length prefix) opener) edits)
-            (goto-char end)))))
+            ;; scan on inside the sexp, so a nested ` or @ is wrapped too
+            (goto-char (+ beg (length prefix)))))))
     edits))
 
 (defun cljbang--regex-body (body)

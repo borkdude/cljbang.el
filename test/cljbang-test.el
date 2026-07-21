@@ -550,8 +550,29 @@ cannot take it."
   (should (eq '& (cljbang-test--eval "`&")))
   (cljbang--set-current-ns nil))
 
-(ert-deftest cljbang-test-nested-syntax-quote-is-refused ()
-  (should-error (cljbang-test--eval "``a")))
+(ert-deftest cljbang-test-nested-syntax-quote ()
+  "One quote collapses per evaluation, as in Clojure."
+  (cljbang-test--eval "(ns sqnest)")
+  (should (equal ''sqnest-x (cljbang-test--eval "``x")))
+  (cljbang--set-current-ns nil))
+
+(ert-deftest cljbang-test-a-macro-writing-macro ()
+  "The auto gensym spans both levels, and ~~'y cancels two quotes."
+  (should (= 6 (cljbang-test--eval
+                "(ns sqmw)
+                 (defmacro deffoo [name] `(defmacro ~name [x#] `(+ ~x# 1)))
+                 (deffoo plus1)
+                 (plus1 5)")))
+  (cljbang--set-current-ns nil)
+  (should (= 8 (cljbang-test--eval
+                "(ns sqmw2)
+                 (defmacro d2 [name] `(defmacro ~name [~'y] `(* ~~'y 2)))
+                 (d2 dbl)
+                 (dbl 4)")))
+  (cljbang--set-current-ns nil))
+
+(ert-deftest cljbang-test-a-deref-can-follow-a-deref ()
+  (should (= 1 (cljbang-test--eval "(let [a (atom (atom 1))] @@a)"))))
 
 (ert-deftest cljbang-test-reader-macros-are-text-only ()
   "A backtick, tilde or @ inside a string or comment is left alone."

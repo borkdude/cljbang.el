@@ -386,7 +386,6 @@ These reader forms need source rewriting and do not work inside `clj!`:
 
 Not implemented:
 
-- A syntax quote inside a syntax quote.
 - `:strs`, `:syms` and namespaced `:keys` destructuring.
 - The `:while` modifier in `doseq`.
 - Protocols and multimethods.
