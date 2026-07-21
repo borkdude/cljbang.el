@@ -226,22 +226,35 @@ def defn defn- defmacro fn let loop recur set! if do try ns require quote commen
 ```
 
 Clojure treats only `def`, `if`, `do`, `set!`, `quote`, `try`, `loop` and
-`recur` as special. The
-rest are macros there, and could become macros here too once there is a
-syntax quote to write them with.
+`recur` as special. The rest are macros there, and could become macros
+here too.
 
 ### Macros
 
-Cljbang has no syntax quote yet, so build macros
-using `list` and `cons`:
+Build a macro with a syntax quote, unquoting with `~` and `~@`:
 
 ```clojure
-(defmacro twice [x] (list '+ x x))
-(twice 3)                                  ;; => 6
+(defmacro unless [test & body]
+  `(if ~test nil (do ~@body)))
+(unless false :ok)                         ;; => :ok
 
-(defmacro unless-neg [n body]
-  (list 'if (list '< n 0) nil body))
-(unless-neg 5 :ok)                         ;; => :ok
+(defmacro twice [x] `(+ ~x ~x))
+(twice 3)                                  ;; => 6
+```
+
+A name ending in `#` is one fresh symbol per template, so a binding the
+macro introduces cannot capture one at the call site:
+
+```clojure
+(defmacro my-or [a b]
+  `(let [v# ~a] (if v# v# ~b)))
+(let [v 5] (my-or nil v))                  ;; => 5
+```
+
+`list` and `cons` still work, and are sometimes shorter:
+
+```clojure
+(defmacro ident [x] (list 'identity x))
 ```
 
 These ship as macros rather than compiler support:
@@ -342,6 +355,9 @@ Lisp semantics:
 (into {} [[:a 1]])     ;; an error. A map and a set are both hash tables,
                        ;;    so conj cannot tell assoc from adding the pair
 (symbol? :a)           ;; => nil, a keyword is a symbol in elisp, not here
+`(a ~x)                ;; => (a 1), a syntax quote leaves symbols bare where
+                       ;;    Clojure qualifies them. Use x# for a local, since
+                       ;;    a bare name can capture one at the call site
 
 (get '((:a . 1)) :a)   ;; => 1, an alist reads as a map
 (get '((1 2) (3 4)) 1) ;; => (2), and so does a list of lists. Clojure
@@ -359,7 +375,7 @@ Inside `clj!` there is no source text to rewrite, so use `hash-set` and
 
 Not implemented:
 
-- Syntax quote. Macros must build expansions with `list` and `cons`.
+- A syntax quote inside a syntax quote.
 - `:strs`, `:syms` and namespaced `:keys` destructuring.
 - The `:while` modifier in `doseq`.
 - Protocols and multimethods.

@@ -338,6 +338,65 @@ keywords."
   ;; a map parameter wants a cljbang map, not an alist
   (should (= 7 (ce-destructured (cljbang-hash-map :a 7)))))
 
+;;; Syntax quote
+
+(ert-deftest cljbang-test-syntax-quote ()
+  (should (equal '(a b c) (cljbang-test--eval "`(a b c)")))
+  (should (equal '(a 1) (cljbang-test--eval "(let [x 1] `(a ~x))")))
+  (should (= 5 (cljbang-test--eval "(let [x 5] `~x)")))
+  (should (equal '(a 3) (cljbang-test--eval "`(a ~(+ 1 2))")))
+  (should (null (cljbang-test--eval "`()"))))
+
+(ert-deftest cljbang-test-syntax-quote-splices ()
+  (should (equal '(a 1 2 b) (cljbang-test--eval "(let [xs [1 2]] `(a ~@xs b))")))
+  (should (equal [1 2 3] (cljbang-test--eval "(let [xs [1 2]] `[~@xs 3])")))
+  (should (equal '(1 2) (cljbang-test--eval "(let [xs [1 2]] `(~@xs))")))
+  (should (equal '(a) (cljbang-test--eval "(let [xs []] `(a ~@xs))"))))
+
+(ert-deftest cljbang-test-syntax-quote-over-collections ()
+  (should (equal [a 1] (cljbang-test--eval "(let [x 1] `[a ~x])")))
+  (should (= 1 (cljbang-test--eval "(let [x 1] (get `{:a ~x} :a))")))
+  (should (= 2 (cljbang-test--eval "(count `#{1 2})")))
+  (should (equal '(a (b (c 2))) (cljbang-test--eval "`(a (b (c ~(+ 1 1))))"))))
+
+(ert-deftest cljbang-test-syntax-quote-leaves-symbols-bare ()
+  "Clojure qualifies them; here the compiler resolves the expansion instead."
+  (should (equal '(a b) (cljbang-test--eval "`(a b)")))
+  (should (eq 'foo (cljbang-test--eval "`foo"))))
+
+(ert-deftest cljbang-test-auto-gensym ()
+  "x# is one fresh name per template, which is what stops capture."
+  (let ((form (cljbang-test--eval "`(let [x# 1] x#)")))
+    (should (eq (nth 0 form) 'let))
+    (should (eq (aref (nth 1 form) 0) (nth 2 form)))
+    (should-not (eq (aref (nth 1 form) 0) (intern "x#"))))
+  (should (not (equal (cljbang-test--eval "`x#") (cljbang-test--eval "`x#")))))
+
+(ert-deftest cljbang-test-macros-written-with-syntax-quote ()
+  (should (= 9 (cljbang-test--eval "(defmacro sq2 [x] `(* ~x ~x)) (sq2 (+ 1 2))")))
+  (should (= 2 (cljbang-test--eval
+                "(defmacro wh [t & body] `(if ~t (do ~@body) nil)) (wh true 1 2)")))
+  (should (equal [1 2] (cljbang-test--eval "(defmacro v2 [& xs] `[~@xs]) (v2 1 2)"))))
+
+(ert-deftest cljbang-test-auto-gensym-avoids-capture ()
+  (should (= 5 (cljbang-test--eval
+                "(defmacro my-or [a b] `(let [v# ~a] (if v# v# ~b)))
+                 (let [v 5] (my-or nil v))"))))
+
+(ert-deftest cljbang-test-unquote-outside-a-syntax-quote ()
+  (should-error (cljbang-test--eval "~x"))
+  (should-error (cljbang-test--eval "(list ~x)")))
+
+(ert-deftest cljbang-test-nested-syntax-quote-is-refused ()
+  (should-error (cljbang-test--eval "``a")))
+
+(ert-deftest cljbang-test-reader-macros-are-text-only ()
+  "A backtick, tilde or @ inside a string or comment is left alone."
+  (should (equal "a ~b and `c and @d" (cljbang-test--eval "(str \"a ~b and `c and @d\")")))
+  (should (equal "x#" (cljbang-test--eval "(str \"x#\")")))
+  (should (equal '(a "~not-unquoted" b) (cljbang-test--eval "`(a \"~not-unquoted\" b)")))
+  (should (eq :ok (cljbang-test--eval ";; `backtick ~tilde @at x#\n:ok"))))
+
 ;;; Macros
 
 (ert-deftest cljbang-test-defmacro ()

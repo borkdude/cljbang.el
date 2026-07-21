@@ -522,6 +522,66 @@ key is the pattern and the value is the map key to look up."
          ,@(cljbang--compile-recur-body (remq '&rest arglist)
                                         (nreverse pairs) body env*)))))
 
+  ;; A syntax quote builds the form rather than quoting it: every part is
+;; quoted except what an unquote marks, so the result is code the caller
+;; can splice.  Symbols stay bare, the way a macro written with list and
+;; cons emits them, and the compiler resolves them when the expansion is
+;; compiled.  A trailing # gives one gensym per name per template, which
+;; is what keeps a macro from capturing a binding.
+
+(defun cljbang--auto-gensym (sym gensyms)
+  "Gensym for SYM, a name ending in #, the same one throughout GENSYMS."
+  (let ((name (symbol-name sym)))
+    (or (gethash name gensyms)
+        (puthash name
+                 (gensym (concat (substring name 0 -1) "-"))
+                 gensyms))))
+
+(defun cljbang--template (form gensyms)
+  "Cljbang form that builds FORM, honouring unquote.  GENSYMS holds x# names."
+  (when (and (consp form) (memq (car form) '(\` \, \,@ cljbang--syntax-quote)))
+    (error "cljbang: a nested syntax quote is not supported"))
+  (pcase form
+    (`(cljbang--unquote ,x) x)
+    (`(cljbang--unquote-splicing ,_)
+     (error "cljbang: ~@ only makes sense inside a collection"))
+    ((pred keywordp) form)
+    ((pred symbolp)
+     (cond ((null form) nil)
+           ((memq form '(t true false)) form)
+           ((string-suffix-p "#" (symbol-name form))
+            (list 'quote (cljbang--auto-gensym form gensyms)))
+           (t (list 'quote form))))
+    ((pred vectorp)
+     (list 'vec (cljbang--template-seq (append form nil) gensyms)))
+    (`(cljbang--map-literal . ,kvs)
+     (list 'apply 'hash-map (cljbang--template-seq kvs gensyms)))
+    (`(cljbang--set-literal . ,xs)
+     (list 'apply 'hash-set (cljbang--template-seq xs gensyms)))
+    ((pred consp) (cljbang--template-seq form gensyms))
+    (_ form)))
+
+(defun cljbang--template-seq (forms gensyms)
+  "Cljbang form building the list FORMS, splicing where ~@ says to."
+  (let (parts run spliced)
+    (dolist (f forms)
+      (pcase f
+        (`(cljbang--unquote-splicing ,x)
+         (when run (push (cons 'list (nreverse run)) parts) (setq run nil))
+         (setq spliced t)
+         (push x parts))
+        (_ (push (cljbang--template f gensyms) run))))
+    (when run (push (cons 'list (nreverse run)) parts))
+    (setq parts (nreverse parts))
+    (cond ((null parts) nil)
+          ;; concat even for one part when it was spliced in, since what
+          ;; was spliced may be a vector and the result is a list
+          ((and (null (cdr parts)) (not spliced)) (car parts))
+          (t (cons 'concat parts)))))
+
+(defun cljbang--compile-syntax-quote (form env)
+  (cljbang-compile (cljbang--template form (make-hash-table :test #'equal)) env))
+
 (defun cljbang--compile-let (bindings body env)
   (let (pairs (env* env))
     (cl-loop for (pattern val) on (append bindings nil) by #'cddr
@@ -814,6 +874,10 @@ magti/status without complaining about magit/status."
       ('cljbang--set-literal
        `(cljbang-hash-set ,@(cljbang--compile-body (cdr form) env)))
       ('cljbang--fn-literal (cljbang--compile-fn-literal (cdr form) env))
+      ('cljbang--syntax-quote (cljbang--compile-syntax-quote (cadr form) env))
+      ((or 'cljbang--unquote 'cljbang--unquote-splicing)
+       (error "cljbang: %s outside of a syntax quote"
+              (if (eq (car form) 'cljbang--unquote) "~" "~@")))
       ('quote form)
       ('comment nil)
       ('require
@@ -926,50 +990,92 @@ magti/status without complaining about magit/status."
     ("#(" . "(cljbang--fn-literal "))
   "Reader dispatch forms, and the text the elisp reader accepts instead.")
 
+(defun cljbang--code-position-p (pos)
+  "Whether POS is code rather than inside a string or a comment."
+  (let ((state (save-excursion (syntax-ppss pos))))
+    (not (or (nth 3 state) (nth 4 state)))))
+
+(defun cljbang--escape-auto-gensyms ()
+  "Escape the # ending an auto gensym name in the current buffer.
+The elisp reader opens a dispatch on #, so x# has to reach it as x\\#.
+Done before anything scans a sexp, so x# counts as the one symbol it is."
+  (let (spots)
+    (goto-char (point-min))
+    (while (search-forward "#" nil t)
+      (let ((beg (match-beginning 0)))
+        (when (and (cljbang--code-position-p beg)
+                   (> beg (point-min))
+                   ;; inside a name, and ending it
+                   (not (memq (char-before beg)
+                              '(?\s ?\t ?\n ?\( ?\[ ?{ ?\) ?\] ?} ?# ?\' ?` ?~ ?@ ?, ?\")))
+                   (memq (char-after (1+ beg))
+                         '(?\s ?\t ?\n ?\) ?\] ?} nil)))
+          (push beg spots))))
+    ;; latest first, so the earlier positions stay valid
+    (dolist (beg spots)
+      (goto-char beg)
+      (insert "\\"))))
+
+(defun cljbang--wrap-next-sexp (prefix opener edits &optional sexp-at token-start
+                                       not-before)
+  "Add edits to EDITS wrapping the sexp after each PREFIX in OPENER.
+SEXP-AT is where the sexp starts relative to PREFIX, its length by
+default.  TOKEN-START limits the match to a prefix that opens a token,
+which @ needs because an elisp symbol may contain one.  NOT-BEFORE skips
+a match followed by that character, which is how ~ leaves ~@ alone."
+  (let ((skip (or sexp-at (length prefix))))
+    (goto-char (point-min))
+    (while (search-forward prefix nil t)
+      ;; syntax-ppss moves point, so keep the search position
+      (let ((beg (match-beginning 0)))
+        (when (and (cljbang--code-position-p beg)
+                   (not (and not-before
+                             (eq (char-after (+ beg (length prefix))) not-before)))
+                   (or (not token-start)
+                       (= beg (point-min))
+                       (memq (char-before beg) '(?\s ?\t ?\n ?\( ?\[ ?{))))
+          (goto-char (+ beg skip))
+          (when-let* ((end (ignore-errors
+                             (save-excursion (forward-sexp) (point)))))
+            (push (list end 0 ")") edits)
+            (push (list beg (length prefix) opener) edits)
+            (goto-char end)))))
+    edits))
+
 (defun cljbang--rewrite-dispatch (s)
-  "Rewrite #{ and #( in S to forms the elisp reader accepts.
-Occurrences inside a string are left alone.  Needs the source text, so
-it applies to files and inline evaluation but not to `clj!'."
+  "Rewrite the reader macros in S to forms the elisp reader accepts.
+Occurrences inside a string or a comment are left alone.  Needs the
+source text, so it applies to files and inline evaluation but not to
+`clj!'."
   (with-temp-buffer
     (insert s)
     (let ((table (make-syntax-table)))
       (modify-syntax-entry ?\" "\"" table)
       (modify-syntax-entry ?\\ "\\" table)
+      (modify-syntax-entry ?\; "<" table)
+      (modify-syntax-entry ?\n ">" table)
+      ;; braces are delimiters here, so scanning a sexp spans a map, even
+      ;; though the elisp reader itself will need them spliced apart
+      (modify-syntax-entry ?{ "(}" table)
+      (modify-syntax-entry ?} "){" table)
       (set-syntax-table table))
+    (cljbang--escape-auto-gensyms)
     (let (edits)
       (pcase-dolist (`(,find . ,replace) cljbang--dispatch-rewrites)
         (goto-char (point-min))
         (while (search-forward find nil t)
-          ;; syntax-ppss moves point, so keep the search position
           (let ((beg (match-beginning 0)))
-            (unless (save-excursion (nth 3 (syntax-ppss beg)))
+            (when (cljbang--code-position-p beg)
               (push (list beg (length find) replace) edits))
             (goto-char (+ beg (length find))))))
-      ;; #"..." needs a closing paren after the string, so it takes two
-      ;; edits and has to find where the string ends
-      (goto-char (point-min))
-      (while (search-forward "#\"" nil t)
-        (let ((beg (match-beginning 0)))
-          (unless (save-excursion (nth 3 (syntax-ppss beg)))
-            (goto-char (1+ beg))              ; on the opening quote
-            (let ((end (save-excursion (forward-sexp) (point))))
-              (push (list end 0 ")") edits)
-              (push (list beg 2 "(cljbang-re-pattern \"") edits)
-              (goto-char end)))))
-      ;; @x is a deref of the sexp after it, so it takes two edits as well.
-      ;; Only at the start of a token, since an elisp symbol may contain @.
-      (goto-char (point-min))
-      (while (search-forward "@" nil t)
-        (let ((beg (match-beginning 0)))
-          (when (and (not (save-excursion (nth 3 (syntax-ppss beg))))
-                     (or (= beg (point-min))
-                         (memq (char-before beg) '(?\s ?\t ?\n ?\( ?\[ ?{))))
-            (goto-char (1+ beg))
-            (when-let* ((end (ignore-errors
-                               (save-excursion (forward-sexp) (point)))))
-              (push (list end 0 ")") edits)
-              (push (list beg 1 "(cljbang-deref ") edits)
-              (goto-char end)))))
+      ;; each of these takes two edits, an opener and a closing paren that
+      ;; has to be found by scanning the sexp the reader macro applies to.
+      ;; ~@ goes before ~, so the longer one wins the shared tilde.
+      (setq edits (cljbang--wrap-next-sexp "#\"" "(cljbang-re-pattern \"" edits 1))
+      (setq edits (cljbang--wrap-next-sexp "`" "(cljbang--syntax-quote " edits))
+      (setq edits (cljbang--wrap-next-sexp "~@" "(cljbang--unquote-splicing " edits))
+      (setq edits (cljbang--wrap-next-sexp "~" "(cljbang--unquote " edits nil nil ?@))
+      (setq edits (cljbang--wrap-next-sexp "@" "(cljbang-deref " edits nil t))
       ;; latest position first, so the earlier ones stay valid
       (pcase-dolist (`(,pos ,len ,replace)
                      (sort edits (lambda (a b) (> (car a) (car b)))))
