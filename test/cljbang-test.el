@@ -68,7 +68,6 @@ arrives split.  Quoting has to be reapplied after the braces are rebuilt."
 (ert-deftest cljbang-test-get-reads-native-elisp-data ()
   "get, and so destructuring, reads alists and plists as well as maps."
   (should (= 1 (cljbang-test--eval "(get '((:a . 1)) :a)")))
-  (should (= 1 (cljbang-test--eval "(get '(:a 1) :a)")))
   (should (= 1 (cljbang-test--eval "(:a '((:a . 1)))")))
   (should (cljbang-test--eval "(contains? '((:a . 1)) :a)"))
   (should-not (cljbang-test--eval "(contains? '((:a . 1)) :z)")))
@@ -76,18 +75,20 @@ arrives split.  Quoting has to be reapplied after the braces are rebuilt."
 (ert-deftest cljbang-test-destructure-native-elisp-data ()
   (should (equal '(1 2) (cljbang-test--eval
                          "(let [{:keys [a b]} '((:a . 1) (:b . 2))] (list a b))")))
-  (should (= 9 (cljbang-test--eval "(let [{:keys [a]} '(:a 9)] a)")))
   (should (= 7 (cljbang-test--eval "((fn [{:keys [a]}] a) '((:a . 7)))"))))
 
 (ert-deftest cljbang-test-get-tells-absent-from-nil ()
   "A key present with a nil value is not the same as a missing key."
   (should-not (cljbang-test--eval "(get '((:a . nil)) :a :fallback)"))
-  (should-not (cljbang-test--eval "(get '(:a nil) :a :fallback)"))
   (should (eq :fallback (cljbang-test--eval "(get '((:a . 1)) :z :fallback)"))))
 
 (ert-deftest cljbang-test-lists-are-not-associative ()
-  "A plain list is sequential, so get finds nothing in it, as in Clojure."
+  "A plain list is sequential, so get finds nothing in it, as in Clojure.
+Only an alist reads as a map, since a plist cannot be told from a list of
+keywords."
   (should-not (cljbang-test--eval "(get '(1 2 3) 0)"))
+  (should-not (cljbang-test--eval "(get '(:a :b :c) :a)"))
+  (should-not (cljbang-test--eval "(get '(:a 1) :a)"))
   (should (= 1 (cljbang-test--eval "(nth '(1 2 3) 0)")))
   (should (equal '(1 2) (cljbang-test--eval "(let [[a b] '(1 2)] (list a b))"))))
 

@@ -128,8 +128,7 @@ my-config-answer          ;; => 7
 They are ordinary elisp functions. Arity is checked, `interactive` makes
 a command, and `C-h f` shows the arglist and docstring.
 
-Destructuring reads native elisp data, so an alist or plist works
-wherever a map does:
+Destructuring reads an alist, which is the shape Emacs passes around:
 
 ```clojure
 (defn port [{:keys [host port]}] (str host ":" port))
@@ -137,10 +136,10 @@ wherever a map does:
 
 ```emacs-lisp
 (port '((:host . "localhost") (:port . 8080)))   ;; => "localhost:8080"
-(port '(:host "localhost" :port 8080))           ;; => "localhost:8080"
 ```
 
-A map that cljbang builds is a hash table, so elisp reading one back uses
+A plist does not, because every list of keywords would look like one. A
+map that cljbang builds is a hash table, so elisp reading one back uses
 `gethash`.
 
 ```clojure
@@ -317,6 +316,11 @@ Host semantics win where they conflict, unless otherwise noted, like in Squint.
 
 #"\\(a\\|b\\)"       ;; elisp regex syntax, where Clojure writes #"(a|b)"
 (assoc m :k 1)      ;; copies the map, so O(n)
+
+(get '((:a . 1)) :a)   ;; => 1, an alist reads as a map
+(get '((1 2) (3 4)) 1) ;; => (2), and so does a list of lists. Clojure
+                       ;;    finds nothing here, but elisp uses lists for
+                       ;;    both sequences and maps
 ```
 
 Inside `clj!` there is no source text to rewrite, so use `hash-set` and

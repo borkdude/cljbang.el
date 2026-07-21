@@ -12,8 +12,6 @@
 (require 'seq)
 ;; string-join, if-let* and when-let* live here before Emacs 29
 (require 'subr-x)
-;; map-elt reads alists and plists as well as hash tables
-(require 'map)
 
 (defun cljbang-first (coll)
   (if (seq-empty-p coll) nil (seq-elt coll 0)))
@@ -137,14 +135,14 @@ Reading native elisp data matters because destructuring goes through here."
                          (aref m k)
                        default))
         ((null m) default)
-        ;; a key present with a nil value is not the same as absent, so
-        ;; ask whether the entry exists rather than what it returned
+        ;; An alist reads as a map, which is what Emacs passes around:
+        ;; auto-mode-alist and a hundred others.  A plist does not, since
+        ;; every list of keywords would look like one.  A key present
+        ;; with a nil value is not the same as an absent key, so ask
+        ;; whether the entry exists rather than what it returned.
         ((consp (car m))
          (let ((cell (assoc k m)))
            (if cell (cdr cell) default)))
-        ((consp m)
-         (let ((tail (plist-member m k)))
-           (if tail (cadr tail) default)))
         (t default)))
 
 (defun cljbang--invoke (f &rest args)
@@ -163,7 +161,7 @@ which are vector-like, out of the lookup branches."
          (not (eq 'cljbang--absent (gethash k coll 'cljbang--absent))))
         ((vectorp coll) (and (integerp k) (>= k 0) (< k (length coll))))
         ((null coll) nil)
-        ((consp coll) (and (map-elt coll k) t))
+        ((consp (car coll)) (and (assoc k coll) t))
         (t nil)))
 
 (defun cljbang-assoc (m k v)
