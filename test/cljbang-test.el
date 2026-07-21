@@ -587,6 +587,33 @@ keywords."
   (should-error (cljbang-test--eval "(loop [i 0] (recur 1 2))"))
   (should-error (cljbang-test--eval "(loop [i 0] ((fn [] (recur 1))))")))
 
+(ert-deftest cljbang-test-recur-in-a-function ()
+  "The parameters are the recur target, so a fn recurs to itself."
+  (should (= 0 (cljbang-test--eval "((fn [x] (if (pos? x) (recur (dec x)) x)) 5)")))
+  (should (= 0 (cljbang-test--eval
+                "(defn countdown [x] (if (pos? x) (recur (dec x)) x)) (countdown 5)")))
+  (should (= 6 (cljbang-test--eval
+                "(defn sum [xs acc] (if (seq xs) (recur (rest xs) (+ acc (first xs))) acc))
+                 (sum [1 2 3] 0)")))
+  (should (= 3 (cljbang-test--eval
+                "(defn g [{:keys [n]}] (if (< n 3) (recur {:n (inc n)}) n)) (g {:n 0})")))
+  (should (= 6 (cljbang-test--eval
+                "(defn h [x & xs] (if (seq xs) (recur (+ x (first xs)) (rest xs)) x))
+                 (h 1 2 3)"))))
+
+(ert-deftest cljbang-test-recur-in-a-function-does-not-grow-the-stack ()
+  (should (= 100000 (cljbang-test--eval
+                     "(defn f [x] (if (< x 100000) (recur (inc x)) x)) (f 0)"))))
+
+(ert-deftest cljbang-test-a-function-without-recur-is-a-plain-lambda ()
+  "The loop is only emitted when a recur asks for one."
+  (should (equal '(lambda (x) (* x 2))
+                 (cljbang-compile (car (cljbang--read-forms "(fn [x] (* x 2))"))))))
+
+(ert-deftest cljbang-test-recur-checks-the-function-arity ()
+  (should-error (cljbang-test--eval "((fn [x] (recur x x)) 1)"))
+  (should-error (cljbang-test--eval "(defn bad [x] (+ 1 (recur x)))")))
+
 (ert-deftest cljbang-test-recur-must-be-in-tail-position ()
   "Clojure refuses these, and running them would half update the loop."
   (should-error (cljbang-test--eval "(loop [i 0] (if (< i 3) (+ 1 (recur (inc i))) i))"))

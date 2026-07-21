@@ -362,7 +362,7 @@ Not implemented:
 - Syntax quote. Macros must build expansions with `list` and `cons`.
 - `:strs`, `:syms` and namespaced `:keys` destructuring.
 - The `:while` modifier in `doseq`.
-- `recur` in a function body. It only recurs to a `loop`.
+- Multiple arities in one `defn`.
 - Protocols and multimethods.
 
 ## Benchmarks

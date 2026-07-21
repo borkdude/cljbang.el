@@ -427,9 +427,7 @@ key is the pattern and the value is the map key to look up."
     (list nil (car rest) (cdr rest))))
 
 (defun cljbang--compile-fn (params body env)
-  ;; a fn body is not the loop's, so recur inside one does not reach out
-  (let ((cljbang--recur-target nil)
-        (arglist nil) (patterns nil) (env* env))
+  (let ((arglist nil) (patterns nil) (env* env))
     ;; a destructuring param becomes a gensym in the arglist, unpacked by
     ;; a let* wrapped around the body
     (dolist (p (append params nil))
@@ -444,9 +442,11 @@ key is the pattern and the value is the map key to look up."
         (dolist (b (cljbang--destructure (car pat) (cdr pat) env*))
           (push b pairs)
           (push (car b) env*)))
-      (let ((compiled (cljbang--compile-body body env*)))
-        `(lambda ,arglist
-           ,@(if pairs `((let* ,(nreverse pairs) ,@compiled)) compiled))))))
+      ;; the parameters are the recur target, so a tail recur re-enters the
+      ;; function without a call, as it does in Clojure
+      `(lambda ,arglist
+         ,@(cljbang--compile-recur-body (remq '&rest arglist)
+                                        (nreverse pairs) body env*)))))
 
 (defun cljbang--compile-let (bindings body env)
   (let (pairs (env* env))
@@ -509,9 +509,6 @@ key is the pattern and the value is the map key to look up."
   (let* ((pairs (cl-loop for (pattern val) on (append bindings nil) by #'cddr
                          collect (list pattern val)))
          (slots (mapcar (lambda (_) (gensym "cljbang-loop-")) pairs))
-         (temps (mapcar (lambda (_) (gensym "cljbang-recur-")) pairs))
-         (again (gensym "cljbang-again-"))
-         (result (gensym "cljbang-result-"))
          (env* env)
          inits bound)
     (cl-loop for (_ val) in pairs
@@ -522,19 +519,41 @@ key is the pattern and the value is the map key to look up."
              do (dolist (b (cljbang--destructure pattern slot env*))
                   (push b bound)
                   (push (car b) env*)))
-    (let* ((cljbang--recur-target (list slots temps again))
-           (compiled (cljbang--compile-body body env*)))
-      (cljbang--check-recur-body compiled t)
+    `(let* ,(nreverse inits)
+       ,@(cljbang--compile-recur-body slots (nreverse bound) body env*))))
+
+;; Shared by loop and fn, which differ only in where the slots come from:
+;; a loop initialises them itself, a fn takes them as arguments.  The while
+;; is emitted only when the body holds a recur, so an ordinary function
+;; compiles to the lambda it would have before.
+(defun cljbang--compile-recur-body (slots bound body env)
+  "Compile BODY, with SLOTS as the recur target and BOUND unpacking them.
+Returns a list of forms, looping when a recur asks for it."
+  (let* ((temps (mapcar (lambda (_) (gensym "cljbang-recur-")) slots))
+         (again (gensym "cljbang-again-"))
+         (result (gensym "cljbang-result-"))
+         (compiled (let ((cljbang--recur-target (list slots temps again)))
+                     (cljbang--compile-body body env))))
+    (cljbang--check-recur-body compiled t)
+    (if (not (cl-some #'cljbang--has-recur compiled))
+        (if bound `((let* ,bound ,@compiled)) compiled)
       (setq compiled (mapcar #'cljbang--strip-recur-marks compiled))
-      `(let* (,@(nreverse inits) ,@temps (,again t) (,result nil))
-         (while ,again
-           (setq ,again nil)
-           (let* ,(nreverse bound)
-             (setq ,result (progn ,@compiled)))
-           (when ,again
-             (setq ,@(cl-loop for slot in slots for temp in temps
-                              append (list slot temp)))))
-         ,result))))
+      `((let* (,@temps (,again t) (,result nil))
+          (while ,again
+            (setq ,again nil)
+            (let* ,bound (setq ,result (progn ,@compiled)))
+            (when ,again
+              (setq ,@(cl-loop for slot in slots for temp in temps
+                               append (list slot temp)))))
+          ,result)))))
+
+(defun cljbang--has-recur (form)
+  "Whether FORM holds a recur mark."
+  (cond ((not (consp form)) nil)
+        ((not (proper-list-p form)) nil)
+        ((eq (car form) 'quote) nil)
+        ((eq (car form) 'cljbang--recur) t)
+        (t (cl-some #'cljbang--has-recur form))))
 
 (defun cljbang--compile-recur (args env)
   (unless cljbang--recur-target
