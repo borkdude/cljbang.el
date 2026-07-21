@@ -361,12 +361,11 @@ Lisp semantics:
 #"\\(a\\|b\\)"       ;; elisp regex syntax, where Clojure writes #"(a|b)"
 (assoc m :k 1)      ;; copies the map, so O(n)
 
-(catch file-missing e e)   ;; catch takes an elisp error symbol, not a
-                           ;;    class name like Exception
+(catch :default e e)       ;; catches anything, as in ClojureScript
+(catch el/file-missing e e)  ;; or a host error symbol, as js/Error is there
 
 (into {} [[:a 1]])     ;; an error. A map and a set are both hash tables,
                        ;;    so conj cannot tell assoc from adding the pair
-(symbol? :a)           ;; => nil, a keyword is a symbol in elisp, not here
 
 (get '((:a . 1)) :a)   ;; => 1, an alist reads as a map
 (get '((1 2) (3 4)) 1) ;; => (2), and so does a list of lists. Clojure

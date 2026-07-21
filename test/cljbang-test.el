@@ -831,6 +831,23 @@ cannot take it."
   (should (null (cljbang-test--eval "(ex-cause (ex-info \"m\" {}))")))
   (should (null (cljbang-test--eval "(try (throw 5) (catch error e (ex-message e)))"))))
 
+(ert-deftest cljbang-test-catch-takes-a-host-error-symbol ()
+  "el/ names a host error the way js/Error does in ClojureScript."
+  (should (eq :caught (cljbang-test--eval
+                       "(try (el/insert-file-contents \"/no/such\")
+                          (catch el/file-missing e :caught))")))
+  (should (eq :caught (cljbang-test--eval
+                       "(try (el/insert-file-contents \"/no/such\")
+                          (catch file-missing e :caught))"))))
+
+(ert-deftest cljbang-test-catch-warns-on-a-clause-that-never-matches ()
+  (let (warnings)
+    (cl-letf (((symbol-function 'display-warning)
+               (lambda (_type message &rest _) (push message warnings))))
+      (cljbang-test--eval "(try 1 (catch el/flie-missing e :typo))")
+      (should (= 1 (length warnings)))
+      (should (string-match-p "never matches" (car warnings))))))
+
 (ert-deftest cljbang-test-try-rejects-jvm-class-names ()
   "Exception would compile but never match, since matching goes by error symbol."
   (should-error (cljbang-test--eval "(try (throw 5) (catch Exception e e))"))

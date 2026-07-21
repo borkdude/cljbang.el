@@ -128,6 +128,13 @@ what `cljbang-require' has to go on when called from elisp."
   :type '(repeat directory)
   :group 'cljbang)
 
+(defcustom cljbang-warn-unresolved t
+  "Whether to warn when a qualified name resolves to nothing defined.
+An autoloaded function counts as defined, so this catches a typo like
+magti/status without complaining about magit/status."
+  :type 'boolean
+  :group 'cljbang)
+
 (defvar cljbang--loaded-ns (make-hash-table :test #'equal)
   "Namespaces already loaded, so a :require happens once.")
 
@@ -629,12 +636,26 @@ stay as they are."
 ;; too.  One gensym holds the error for every handler, since condition-case
 ;; binds a single variable.
 (defun cljbang--catch-symbol (sym)
-  "Elisp error symbol for the SYM a catch clause names."
-  (cond ((eq sym :default) t)
-        ((memq sym '(Exception Throwable Error))
-         (error "cljbang: catch takes an elisp error symbol, not %s" sym))
-        ((symbolp sym) sym)
-        (t (error "cljbang: catch needs an error symbol, got %S" sym))))
+  "Elisp error symbol for the SYM a catch clause names.
+:default catches everything, as it does in ClojureScript, and el/ names a
+host error the way js/Error does there."
+  (let ((err (cond ((eq sym :default) t)
+                   ((cljbang--el-symbol sym))
+                   ((memq sym '(Exception Throwable Error))
+                    (error "cljbang: catch takes an elisp error symbol or :default, not %s"
+                           sym))
+                   ((symbolp sym) sym)
+                   (t (error "cljbang: catch needs an error symbol, got %S" sym)))))
+    ;; a symbol naming no condition matches nothing, so the error would
+    ;; sail past a clause that looks right
+    (when (and cljbang-warn-unresolved
+               (not (eq err t))
+               (not (get err 'error-conditions)))
+      (display-warning 'cljbang
+                       (format "catch %s names no error condition, so it never matches"
+                               sym)
+                       :warning))
+    err))
 
 (defun cljbang--compile-try (forms env)
   "Compile the FORMS of a try: a body, then catch and finally clauses."
@@ -857,13 +878,6 @@ nothing, as it does in Clojure, and so does a name cljbang never saw."
         ((alist-get form cljbang--core-fns)
          `#',(alist-get form cljbang--core-fns))
         (t `(cljbang--resolve ',form))))
-
-(defcustom cljbang-warn-unresolved t
-  "Whether to warn when a qualified name resolves to nothing defined.
-An autoloaded function counts as defined, so this catches a typo like
-magti/status without complaining about magit/status."
-  :type 'boolean
-  :group 'cljbang)
 
 (defun cljbang--interned-here-p (sym)
   "Whether SYM is a var cljbang interned, which may not be evaluated yet."
