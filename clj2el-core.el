@@ -18,14 +18,22 @@
 (defun clj2el-second (coll)
   (clj2el-first (clj2el-rest coll)))
 
+;; a set, map or keyword can be passed where a function is expected, as
+;; in (filter #{1 3} xs).  clj2el--fn resolves that once per call rather
+;; than once per element, so the ordinary case stays a bare funcall.
+
+(defun clj2el--fn (f)
+  "F as something funcall can take, wrapping a set, map or keyword."
+  (if (functionp f) f (lambda (&rest args) (apply #'clj2el--invoke f args))))
+
 (defun clj2el-map (f coll)
-  (mapcar (lambda (x) (funcall f x)) (seq-into coll 'list)))
+  (mapcar (clj2el--fn f) (seq-into coll 'list)))
 
 (defun clj2el-filter (pred coll)
-  (seq-filter pred (seq-into coll 'list)))
+  (seq-filter (clj2el--fn pred) (seq-into coll 'list)))
 
 (defun clj2el-reduce (f init coll)
-  (seq-reduce f (seq-into coll 'list) init))
+  (seq-reduce (clj2el--fn f) (seq-into coll 'list) init))
 
 (defun clj2el-count (coll)
   (if (hash-table-p coll) (hash-table-count coll) (seq-length coll)))
@@ -76,6 +84,16 @@ Clojure's subs treats it as out of range, so reject it."
   (cond ((hash-table-p m) (gethash k m default))
         ((vectorp m) (if (< k (length m)) (aref m k) default))
         (t default)))
+
+(defun clj2el--invoke (f &rest args)
+  "Call F as Clojure does.
+Sets, maps and vectors look their argument up.  A keyword looks itself
+up in its argument.  Checking functionp first keeps byte-code objects,
+which are vector-like, out of the lookup branches."
+  (cond ((functionp f) (apply f args))
+        ((or (hash-table-p f) (vectorp f)) (apply #'clj2el-get f args))
+        ((keywordp f) (apply #'clj2el-get (car args) f (cdr args)))
+        (t (apply f args))))
 
 (defun clj2el-contains? (coll k)
   "Whether COLL has key K.  For a vector K is an index, as in Clojure."
@@ -474,6 +492,8 @@ key is the pattern and the value is the map key to look up."
        (let ((head (car form))
              (args (clj2el--compile-body (cdr form) env)))
          (cond
+          ;; a keyword looks itself up, and is a symbol, so test it first
+          ((keywordp head) `(clj2el-get ,(car args) ,head ,@(cdr args)))
           ((and (symbolp head) (clj2el--qualified head))
            `(,(clj2el--qualified head) ,@args))
           ((and (symbolp head) (clj2el--ns-resolve head))
@@ -481,9 +501,9 @@ key is the pattern and the value is the map key to look up."
           ((and (symbolp head) (alist-get head clj2el--core-fns))
            `(,(alist-get head clj2el--core-fns) ,@args))
           ((and (symbolp head) (memq head env))
-           `(funcall ,head ,@args))
+           `(clj2el--invoke ,head ,@args))
           ((symbolp head) `(,head ,@args))
-          (t `(funcall ,(clj2el-compile head env) ,@args)))))))))
+          (t `(clj2el--invoke ,(clj2el-compile head env) ,@args)))))))))
 
 ;;; Entry point
 
