@@ -256,8 +256,8 @@ including vars defined later. Use `el/` for Emacs Lisp names:
 (defn greet [x] (str "hello " x))              ;; defined after the macro
 ```
 
-A name ending in `#` is a fresh symbol, so a binding the macro introduces
-cannot capture one at the call site:
+Each name ending in `#` gets one fresh symbol per template, so a binding
+the macro introduces cannot capture one at the call site:
 
 ```clojure
 (defmacro my-or [a b]
@@ -374,10 +374,9 @@ Lisp semantics:
                        ;;    both sequences and maps
 ```
 
-Inside `clj!` there is no source text to rewrite, so no reader macro
-works there: `#{}`, `#()`, `#""`, `` ` ``, `~`, `~@` and `@`. Use
-`hash-set`, `fn`, `re-pattern`, `list` and `deref`, or move the code to a
-`.clj` file:
+These reader forms need source rewriting and do not work inside `clj!`:
+`#{}`, `#()`, `#""`, `` ` ``, `~`, `~@` and `@`. Use `hash-set`, `fn`,
+`re-pattern`, `list` and `deref`, or move the code to a `.clj` file:
 
 ```clojure
 (clj! #{1 2})       ;; read error

@@ -499,14 +499,29 @@ cannot take it."
   (should-error (cljbang-test--eval "(list ~x)")))
 
 (ert-deftest cljbang-test-syntax-quote-keeps-what-the-reader-put-there ()
-  "A regex or a deref is resolved already, so a template leaves it alone."
+  "The reader names the host function, so a template leaves it qualified."
   (cljbang-test--eval "(ns sqreader)")
-  (should (equal '(cljbang-re-pattern "a+") (cljbang-test--eval "`#\"a+\"")))
+  (should (equal '(el/cljbang-re-pattern "a+") (cljbang-test--eval "`#\"a+\"")))
   (should (equal "aaa" (cljbang-test--eval
                         "(defmacro pat [] `(re-find #\"a+\" \"baaa\")) (pat)")))
-  (should (equal '(cljbang-deref sqreader-x) (cljbang-test--eval "`@x")))
+  (should (equal '(el/cljbang-deref sqreader-x) (cljbang-test--eval "`@x")))
   (should (= 7 (cljbang-test--eval
                 "(defmacro getv [x] `@~x) (let [a (atom 7)] (getv a))")))
+  (cljbang--set-current-ns nil))
+
+(ert-deftest cljbang-test-a-reader-form-cannot-be-captured ()
+  "A var named like the function a reader macro emits must not take it."
+  (should (equal "aaa" (cljbang-test--eval
+                        "(ns capr1) (defn cljbang-re-pattern [x] :captured)
+                         (re-find #\"a+\" \"baaa\")")))
+  (cljbang--set-current-ns nil)
+  (should (= 1 (cljbang-test--eval
+                "(ns capr2) (defn cljbang-deref [x] :captured)
+                 (let [a (atom 1)] @a)")))
+  (cljbang--set-current-ns nil)
+  (should (= 1 (cljbang-test--eval
+                "(ns capr3) (defmacro d [x] `@~x) (defn cljbang-deref [x] :captured)
+                 (let [a (atom 1)] (d a))")))
   (cljbang--set-current-ns nil))
 
 (ert-deftest cljbang-test-fn-literal-in-a-template-is-refused ()

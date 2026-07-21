@@ -529,10 +529,8 @@ key is the pattern and the value is the map key to look up."
                  gensyms))))
 
 (defconst cljbang--template-bare
-  '(& cljbang-re-pattern cljbang-deref
-    cljbang--map-literal cljbang--set-literal)
-  "Names a template leaves alone: & as Clojure leaves it, and what the
-reader put there, which is resolved already.")
+  '(& cljbang--map-literal cljbang--set-literal)
+  "Names a template leaves alone, as Clojure leaves & alone.")
 
 (defun cljbang--template-qualified (sym)
   "SYM with its alias expanded, still qualified.
@@ -1127,11 +1125,13 @@ source text, so it applies to files and inline evaluation but not to
       ;; each of these takes two edits, an opener and a closing paren that
       ;; has to be found by scanning the sexp the reader macro applies to.
       ;; ~@ goes before ~, so the longer one wins the shared tilde.
-      (setq edits (cljbang--wrap-next-sexp "#\"" "(cljbang-re-pattern \"" edits 1))
+      ;; el/ so that what the reader emits reaches the host function even
+      ;; where a var of that name is defined
+      (setq edits (cljbang--wrap-next-sexp "#\"" "(el/cljbang-re-pattern \"" edits 1))
       (setq edits (cljbang--wrap-next-sexp "`" "(cljbang--syntax-quote " edits))
       (setq edits (cljbang--wrap-next-sexp "~@" "(cljbang--unquote-splicing " edits))
       (setq edits (cljbang--wrap-next-sexp "~" "(cljbang--unquote " edits nil nil ?@))
-      (setq edits (cljbang--wrap-next-sexp "@" "(cljbang-deref " edits nil t))
+      (setq edits (cljbang--wrap-next-sexp "@" "(el/cljbang-deref " edits nil t))
       ;; latest position first, so the earlier ones stay valid
       (pcase-dolist (`(,pos ,len ,replace)
                      (sort edits (lambda (a b) (> (car a) (car b)))))
