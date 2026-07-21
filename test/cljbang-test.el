@@ -183,6 +183,32 @@
   (should-error (cljbang-test--eval "(set! (foo) 1)")))
 
 
+;;; Macros
+
+(ert-deftest cljbang-test-defmacro ()
+  "A macro sees its arguments unevaluated and its expansion is compiled."
+  (should (= 6 (cljbang-test--eval "(defmacro twice [x] (list '+ x x)) (twice 3)")))
+  (should (= 3 (cljbang-test--eval "(defmacro ident [x] x) (ident (+ 1 2))"))))
+
+(ert-deftest cljbang-test-defmacro-controls-evaluation ()
+  "The point of a macro: the body is not evaluated unless the expansion says so."
+  (should (eq :ok (cljbang-test--eval
+                   "(defmacro unless-neg [n body] (list 'if (list '< n 0) nil body))
+                    (unless-neg 5 :ok)"))))
+
+(ert-deftest cljbang-test-defmacro-in-a-namespace ()
+  (should (= 40 (cljbang-test--eval "(ns mns) (defmacro m1 [x] (list '* x 10)) (m1 4)")))
+  (setq cljbang--current-ns nil))
+
+(ert-deftest cljbang-test-defmacro-runaway-is-caught ()
+  (should-error (cljbang-test--eval "(defmacro loopy [x] (list 'loopy x)) (loopy 1)")))
+
+(ert-deftest cljbang-test-local-binding-shadows-a-macro ()
+  "A let-bound name is a value, not a macro call."
+  (should (= 5 (cljbang-test--eval
+                "(defmacro shadowed [x] (list '+ x 100))
+                 (let [shadowed (fn [n] n)] (shadowed 5))"))))
+
 ;;; Special forms
 
 (ert-deftest cljbang-test-cond ()

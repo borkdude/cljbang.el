@@ -2,6 +2,9 @@
 
 A Clojure-like language that runs as Emacs Lisp.
 
+> **WARNING**: I'm not sure if any of this is a good idea, but it kinda
+> works for me.
+
 Cljbang (`clj!`) compiles Clojure forms to Emacs Lisp forms and evaluates them in the
 running Emacs. There is no subprocess, no transpiled text, and no runtime
 beyond `cljbang-core.el` itself.
@@ -199,7 +202,17 @@ el/tab-width                            ; a variable, not a function
 Special forms:
 
 ```
-def defn fn let set! if when cond do ns quote comment -> ->> time with-out-str
+def defn defn- defmacro fn let set! if when cond do ns quote comment
+-> ->> time with-out-str
+```
+
+Clojure calls only a handful of those special forms and defines the rest
+as macros. Cljbang knows them all, for now. `defmacro` works, with the
+expansion built by hand since there is no syntax quote yet:
+
+```clojure
+(defmacro twice [x] (list '+ x x))
+(twice 3)     ;; => 6
 ```
 
 Functions:

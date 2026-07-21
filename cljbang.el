@@ -70,6 +70,14 @@
 (defvar cljbang--ns-alias-map nil
   "Alist of alias symbol -> namespace name, from (ns ... (:require ... :as ...)).")
 
+(defvar cljbang--macros (make-hash-table :test #'equal)
+  "Macro name -> expander function.
+Registered while compiling, so a later form in the same file can use a
+macro defined above it, as `cljbang--ns-vars' does for defn.")
+
+(defvar cljbang--expanding 0
+  "Depth of macro expansion, to catch a macro that expands to itself.")
+
 (defvar cljbang--ns-vars (make-hash-table :test #'equal)
   "Namespace name -> hash table whose keys are var names defined there.")
 
@@ -175,6 +183,18 @@ PRIVATE gives the double dash elisp uses for internal names."
 ;; (el/my/flymake-inline-ov keeps its slash) and the cljbang--core-fns
 ;; overrides, so elisp's own get, assoc, + ... stay reachable.
 
+(defun cljbang--macro-function (sym)
+  "Expander registered for SYM, plain or namespace qualified, or nil."
+  (let ((name (symbol-name sym)))
+    (or (and cljbang--current-ns
+             (gethash (concat cljbang--current-ns "/" name) cljbang--macros))
+        (gethash name cljbang--macros)
+        (when (string-search "/" name)
+          (pcase-let ((`(,ns ,n) (split-string name "/")))
+            (gethash (concat (or (cdr (assq (intern ns) cljbang--ns-alias-map)) ns)
+                             "/" n)
+                     cljbang--macros))))))
+
 (defun cljbang--el-symbol (sym)
   "Elisp symbol named by an el/ qualified SYM, or nil."
   (let ((name (symbol-name sym)))
@@ -203,6 +223,14 @@ PRIVATE gives the double dash elisp uses for internal names."
                   (intern (concat (string-replace "." "-" full) "-" n)))))))))
 
 ;;; Compiler: Clojure form -> elisp form
+
+;; Clojure calls only a few of these special forms; the rest are macros
+;; there.  cljbang knows them all, until enough of it is written in
+;; cljbang itself.
+(defconst cljbang--special-forms
+  '("def" "defn" "defn-" "defmacro" "fn" "let" "set!" "if" "when" "cond" "do"
+    "ns" "quote" "comment" "->" "->>" "time" "with-out-str")
+  "Names `cljbang-compile' handles itself.")
 
 (defun cljbang--compile-body (forms env)
   (mapcar (lambda (f) (cljbang-compile f env)) forms))
@@ -396,6 +424,33 @@ key is the pattern and the value is the map key to look up."
          `#',(alist-get form cljbang--core-fns))
         (t `(cljbang--resolve ',form))))
 
+(defun cljbang--compile-call (form env)
+  "Compile FORM, a macro call or a function call, in ENV."
+  (let ((head (car form)))
+    (if-let* ((expander (and (symbolp head)
+                             (not (memq head env))
+                             (cljbang--macro-function head))))
+        ;; a macro sees its arguments unevaluated, so expand before compiling
+        (progn
+          (when (> cljbang--expanding 100)
+            (error "cljbang: %s expands without end" head))
+          (let ((cljbang--expanding (1+ cljbang--expanding)))
+            (cljbang-compile (apply expander (cdr form)) env)))
+      (let ((args (cljbang--compile-body (cdr form) env)))
+        (cond
+         ;; a keyword looks itself up, and is a symbol, so test it first
+         ((keywordp head) `(cljbang-get ,(car args) ,head ,@(cdr args)))
+         ((and (symbolp head) (cljbang--qualified head))
+          `(,(cljbang--qualified head) ,@args))
+         ((and (symbolp head) (cljbang--ns-resolve head))
+          `(,(cljbang--ns-resolve head) ,@args))
+         ((and (symbolp head) (alist-get head cljbang--core-fns))
+          `(,(alist-get head cljbang--core-fns) ,@args))
+         ((and (symbolp head) (memq head env))
+          `(cljbang--invoke ,head ,@args))
+         ((symbolp head) `(,head ,@args))
+         (t `(cljbang--invoke ,(cljbang-compile head env) ,@args)))))))
+
 (defun cljbang-compile (form &optional env)
   "Compile Clojure FORM (elisp data) to an elisp form.  ENV = local symbols."
   (cond
@@ -443,6 +498,15 @@ key is the pattern and the value is the map key to look up."
          `(progn (defvar ,name* nil)
                  (setq ,name* ,(cljbang-compile val env))
                  ',name*)))
+      ('defmacro
+       (pcase-let* ((`(,name ,params . ,body) (cdr form))
+                    (name* (cljbang--ns-intern name))
+                    (expander (eval (cljbang--compile-fn params body env) t)))
+         (puthash (symbol-name name) expander cljbang--macros)
+         (when cljbang--current-ns
+           (puthash (concat cljbang--current-ns "/" (symbol-name name))
+                    expander cljbang--macros))
+         `',name*))
       ((or 'defn 'defn-)
        (pcase-let* ((`(,name ,params . ,body) (cdr form))
                     (name* (cljbang--ns-intern name (eq (car form) 'defn-))))
@@ -483,22 +547,7 @@ key is the pattern and the value is the map key to look up."
              (format "Elapsed time: %.6f msecs"
                      (* 1000 (float-time (time-subtract (current-time) ,start)))))
             ,val)))
-      (_ ;; function call
-       (let ((head (car form))
-             (args (cljbang--compile-body (cdr form) env)))
-         (cond
-          ;; a keyword looks itself up, and is a symbol, so test it first
-          ((keywordp head) `(cljbang-get ,(car args) ,head ,@(cdr args)))
-          ((and (symbolp head) (cljbang--qualified head))
-           `(,(cljbang--qualified head) ,@args))
-          ((and (symbolp head) (cljbang--ns-resolve head))
-           `(,(cljbang--ns-resolve head) ,@args))
-          ((and (symbolp head) (alist-get head cljbang--core-fns))
-           `(,(alist-get head cljbang--core-fns) ,@args))
-          ((and (symbolp head) (memq head env))
-           `(cljbang--invoke ,head ,@args))
-          ((symbolp head) `(,head ,@args))
-          (t `(cljbang--invoke ,(cljbang-compile head env) ,@args)))))))))
+      (_ (cljbang--compile-call form env))))))
 
 ;;; Entry point
 

@@ -83,11 +83,6 @@ Elsewhere falls back to `eval-last-sexp'."
 
 ;;; Completion: Clojure names + all of elisp, via completion-at-point
 
-(defconst cljbang--special-forms
-  '("def" "defn" "defn-" "fn" "let" "set!" "if" "when" "cond" "do" "ns" "quote"
-    "comment" "->" "->>" "time" "with-out-str")
-  "Names handled as special forms by `cljbang-compile'.")
-
 (defun cljbang--completion-candidates ()
   "Clojure-side completion candidates: special forms, core fns, ns/aliased vars."
   (let ((cands (copy-sequence cljbang--special-forms)))
