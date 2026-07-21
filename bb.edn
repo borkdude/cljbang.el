@@ -20,7 +20,7 @@
   bench-load {:doc "Compare load cost, source vs byte-compiled"
               :task (shell emacs "--batch" "-L" "." "-l" "bench-load.el")}
 
-  clean {:doc "Remove byte-compiled files"
+  clean {:doc "Remove byte-compiled files and compiled .clj caches"
          :task (doseq [f (fs/glob "." "**.elc")] (fs/delete f))}
 
   ci {:doc "What CI runs"

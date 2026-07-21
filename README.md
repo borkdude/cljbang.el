@@ -62,18 +62,13 @@ Cljbang gives a better overall feeling when you move the source code to a `.clj`
 (cljbang-load-file "example.clj")
 ```
 
-For a config, use the cached loader instead. It byte-compiles the file to
-a `.elc` beside it and reuses that until you edit the source, so startup
-does not pay for the compiler:
-
-```emacs-lisp
-(cljbang-load-file-cached "example.clj")
-```
-
-The cache is named after the Emacs version and the cljbang version, as
-`example.clj.30-0.0.1.elc`, so upgrading either one misses the old cache
-and rebuilds rather than loading output the current compiler would not
-produce. Ignore them in version control:
+The compiled result is cached beside the file as
+`example.clj.30-0.0.1.elc` and reused until you edit the source, so this
+costs about what loading the equivalent elisp would. The name carries the
+Emacs version and the cljbang version, so upgrading either one rebuilds
+rather than loading output the current compiler would not produce. A
+directory that cannot be written simply gets no cache. Ignore them in
+version control:
 
 ```
 *.clj.*.elc
@@ -339,16 +334,16 @@ Loading:
 
 | | |
 |---|---|
-| `cljbang-load-file`, compiles every time | 69 ms |
-| `cljbang-load-file-cached`, cache warm | 1.9 ms |
+| `cljbang-load-file`, cold cache | 157 ms |
+| `cljbang-load-file`, warm cache | 1.9 ms |
 | byte-compiled `.el` using `clj!` | 2.0 ms |
 | byte-compiled plain elisp | 1.0 ms |
 
 Compilation happens at macro-expansion, so a byte-compiled file has no
 cljbang left in it and loads at roughly the speed of the elisp it became.
-`cljbang-load-file-cached` gives a `.clj` file the same treatment, so
-neither form of source is slower than the other once warm. Building the
-cache costs about 160ms, paid once per edit.
+`cljbang-load-file` gives a `.clj` file the same treatment, so neither
+form of source is slower than the other once warm. Building the cache
+costs about 160ms, paid once per edit rather than once per startup.
 
 Running, calling all 1000 functions once:
 

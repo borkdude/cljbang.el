@@ -407,12 +407,12 @@
         (progn
           (write-region "(ns cachedconf)\n(defn greet [x] (str \"hi \" x))\n(def answer 42)\n"
                         nil f nil 'quiet)
-          (cljbang-load-file-cached f)
+          (cljbang-load-file f)
           (should (file-exists-p (cljbang--cache-file f)))
           (should (equal "hi you" (cachedconf-greet "you")))
           (should (= 42 cachedconf-answer))
           ;; again, this time from the cache
-          (should (cljbang-load-file-cached f))
+          (should (cljbang-load-file f))
           (should (equal "hi you" (cachedconf-greet "you"))))
       (delete-directory dir t)
       (setq cljbang--current-ns nil))))
@@ -423,12 +423,12 @@
     (unwind-protect
         (progn
           (write-region "(defn stale-one [] 1)\n" nil f nil 'quiet)
-          (cljbang-load-file-cached f)
+          (cljbang-load-file f)
           (should (= 1 (stale-one)))
           ;; the cache must look older than the source
           (set-file-times (cljbang--cache-file f) (time-subtract (current-time) 10))
           (write-region "(defn stale-one [] 2)\n" nil f nil 'quiet)
-          (cljbang-load-file-cached f)
+          (cljbang-load-file f)
           (should (= 2 (stale-one))))
       (delete-directory dir t))))
 
@@ -447,7 +447,7 @@
     (unwind-protect
         (progn
           (write-region "(ns cachedmac)\n(defmacro dbl [x] (list '* x 2))\n" nil f nil 'quiet)
-          (cljbang-load-file-cached f)
+          (cljbang-load-file f)
           (clrhash cljbang--macros)              ; forget the compile-time registration
           (load (cljbang--cache-file f) nil t)   ; only the cache
           (setq cljbang--current-ns nil)
@@ -495,8 +495,18 @@
   (should (equal "lib/b.clj" (cljbang--ns->file "lib.b")))
   (should (equal "lib/some_thing.clj" (cljbang--ns->file "lib.some-thing"))))
 
+(defun cljbang-test--clear-caches ()
+  "Remove compiled caches under the fixtures.
+They outlive a test run, so a cache built by an older compiler would
+otherwise be picked up by the next one."
+  (dolist (f (directory-files-recursively
+              (expand-file-name "test/requires" cljbang-test--root)
+              "\\.elc\\'"))
+    (delete-file f)))
+
 (ert-deftest cljbang-test-require-loads-clj-file ()
   "A :require pulls in the .clj file it names, without loading it first."
+  (cljbang-test--clear-caches)
   (clrhash cljbang--loaded-ns)
   (let ((dir (expand-file-name "test/requires/" cljbang-test--root)))
     (cljbang-load-file (expand-file-name "app/a.clj" dir))
@@ -538,6 +548,7 @@
 
 (ert-deftest cljbang-test-require-cycle-terminates ()
   "cyc.a and cyc.b require each other, so the guard has to break the loop."
+  (cljbang-test--clear-caches)
   (clrhash cljbang--loaded-ns)
   (let ((dir (expand-file-name "test/requires/" cljbang-test--root)))
     (should (cljbang-load-file (expand-file-name "cyc/a.clj" dir))))
