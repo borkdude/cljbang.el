@@ -7,6 +7,7 @@
 
 ;;; Code:
 
+(require 'subr-x)
 (require 'cljbang)
 
 
@@ -37,9 +38,15 @@ file, a clojure-mode buffer, or inside a (clj! ...) form."
                (looking-at-p "(\\s-*clj!\\_>")))
            (nth 9 (syntax-ppss))))
 
+(defgroup cljbang nil
+  "Clojure that runs as Emacs Lisp."
+  :group 'languages
+  :prefix "cljbang-")
+
 (defface cljbang-result-face
   '((t :inherit shadow :slant italic))
-  "Face for inline evaluation result overlays.")
+  "Face for inline evaluation result overlays."
+  :group 'cljbang)
 
 (defvar-local cljbang--result-overlays nil)
 

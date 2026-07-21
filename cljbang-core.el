@@ -10,6 +10,8 @@
 
 (require 'cl-lib)
 (require 'seq)
+;; string-join, if-let* and when-let* live here before Emacs 29
+(require 'subr-x)
 
 (defun cljbang-first (coll)
   (if (seq-empty-p coll) nil (seq-elt coll 0)))
