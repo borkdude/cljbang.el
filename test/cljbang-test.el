@@ -516,6 +516,28 @@ cannot take it."
                    "(defmacro unless-neg [n body] (list 'if (list '< n 0) nil body))
                     (unless-neg 5 :ok)"))))
 
+(ert-deftest cljbang-test-a-name-collision-warns ()
+  "Munging is not reversible, so two namespaces can want one elisp name."
+  (let (warnings)
+    (cl-letf (((symbol-function 'display-warning)
+               (lambda (_type message &rest _) (push message warnings))))
+      (cljbang-test--eval "(ns coll-a-b) (defn c [] :first)")
+      (should (null warnings))
+      ;; same var again is a reload, not a collision
+      (cljbang-test--eval "(ns coll-a-b) (defn c [] :again)")
+      (should (null warnings))
+      (cljbang-test--eval "(ns coll-a) (defn b-c [] :second)")
+      (should (= 1 (length warnings)))
+      (should (string-match-p "coll-a/b-c interns coll-a-b-c" (car warnings)))
+      (should (string-match-p "already coll-a-b/c" (car warnings)))))
+  (cljbang--set-current-ns nil))
+
+(ert-deftest cljbang-test-what-a-symbol-was-interned-as ()
+  (cljbang-test--eval "(ns internedns) (defn thing [] :x)")
+  (should (equal '("internedns" . "thing") (cljbang--interned-as 'internedns-thing)))
+  (should (null (cljbang--interned-as 'not-a-cljbang-name)))
+  (cljbang--set-current-ns nil))
+
 (ert-deftest cljbang-test-a-macro-belongs-to-its-namespace ()
   "A macro of one namespace must not shadow a name in another."
   (let ((dir (make-temp-file "cljbang-mac" t)))

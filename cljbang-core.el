@@ -55,6 +55,21 @@
 (defun cljbang--ns-var-table (&optional ns)
   (plist-get (cljbang--ns-entry ns) :vars))
 
+;; Munging is not reversible: (ns a-b) with c and (ns a) with b-c both
+;; give a-b-c, as they would in elisp, where nothing tells you whether
+;; org-agenda-files belongs to org-agenda or to org.  An index of what
+;; each symbol was interned as turns the second one into a warning rather
+;; than a definition that quietly replaces the first.
+
+(defun cljbang--interned-table ()
+  "Interned symbol -> the (NAMESPACE . NAME) it was interned as."
+  (or (gethash :interned cljbang--ns-state)
+      (puthash :interned (make-hash-table :test #'eq) cljbang--ns-state)))
+
+(defun cljbang--interned-as (sym)
+  "The (NAMESPACE . NAME) SYM was interned as, or nil."
+  (gethash sym (cljbang--interned-table)))
+
 ;; A macro belongs to the namespace that defined it, the way a var does.
 ;; The ones cljbang ships live in a namespace of their own, so a template
 ;; can name one there and a macro of that name elsewhere cannot take it.

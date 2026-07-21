@@ -187,9 +187,17 @@ actually defined under it, so a typo is still an error."
   "Munged elisp symbol for NAME in the current ns; records the var.
 PRIVATE gives the double dash elisp uses for internal names."
   (if-let* ((ns (cljbang--current-ns)))
-      (let ((sym (intern (concat (cljbang--munge-ns ns)
-                                 (if private "--" "-")
-                                 (symbol-name name)))))
+      (let* ((sym (intern (concat (cljbang--munge-ns ns)
+                                  (if private "--" "-")
+                                  (symbol-name name))))
+             (prev (cljbang--interned-as sym))
+             (here (cons ns (symbol-name name))))
+        (when (and prev (not (equal prev here)))
+          (display-warning 'cljbang
+                           (format "%s/%s interns %s, already %s/%s"
+                                   ns name sym (car prev) (cdr prev))
+                           :warning))
+        (puthash sym here (cljbang--interned-table))
         ;; store the symbol, so resolving does not have to guess which
         ;; spelling this var was defined with
         (puthash (symbol-name name) sym (cljbang--ns-var-table))
@@ -812,14 +820,7 @@ magti/status without complaining about magit/status."
 
 (defun cljbang--interned-here-p (sym)
   "Whether SYM is a var cljbang interned, which may not be evaluated yet."
-  (catch 'cljbang--found
-    (maphash (lambda (key entry)
-               (unless (eq key :current)
-                 (maphash (lambda (_name s)
-                            (when (eq s sym) (throw 'cljbang--found t)))
-                          (plist-get entry :vars))))
-             cljbang--ns-state)
-    nil))
+  (and (cljbang--interned-as sym) t))
 
 (defun cljbang--warn-unresolved (sym original)
   "Warn that ORIGINAL resolved to SYM, which nothing defines."

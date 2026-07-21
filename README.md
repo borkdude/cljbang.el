@@ -189,6 +189,15 @@ Warning (cljbang): magti/status resolves to magti-status, which is not defined
 
 `cljbang-warn-unresolved` turns that off.
 
+Munging is not reversible, so `(ns a-b)` with `c` and `(ns a)` with `b-c`
+both want `a-b-c`, the way nothing tells you whether `org-agenda-files`
+belongs to `org-agenda` or to `org`. The second one warns rather than
+replacing the first:
+
+```
+Warning (cljbang): a/b-c interns a-b-c, already a-b/c
+```
+
 ## Interop
 
 Any name cljbang does not define compiles to a plain elisp call:
