@@ -137,6 +137,10 @@ feature of that name. `lib.some-thing` is `lib/some_thing.clj`.
 
 ```clojure
 (ns my.config
+  ;; clj-kondo is right that :as-alias never loads, and wrong that the
+  ;; call fails, since Emacs autoloads it.  Per file, or once in
+  ;; .clj-kondo/config.edn.
+  {:clj-kondo/config '{:linters {:aliased-namespace-var-usage {:level :off}}}}
   (:require [lib.b :as b]          ;; loads lib/b.clj
             [magit :as m]          ;; loads magit now, about 55ms
             [string :as s]         ;; a built-in prefix, nothing to load
@@ -192,9 +196,9 @@ fine here, so in your own `.clj-kondo/config.edn`:
            :aliased-namespace-var-usage {:level :off}}}
 ```
 
-## Clojure API
+## Standard library
 
-In this section we list the currently supported Clojure API.
+In this section we list the currently supported Clojure-like standard library.
 
 Cljbang has these special forms:
 
