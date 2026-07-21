@@ -203,17 +203,31 @@ which are vector-like, out of the lookup branches."
 
 (defvar cljbang-load-path nil
   "Directories searched for the .clj files named in a :require.
-The directory of the file being loaded is searched first.")
+The source root of the file being loaded is searched first.")
 
 (defvar cljbang--loaded-ns (make-hash-table :test #'equal)
   "Namespaces already loaded, so a :require happens once.")
 
+(defvar cljbang--load-file-name nil
+  "Absolute name of the file currently loading, if any.")
+
 (defvar cljbang--load-file-dir nil
-  "Directory of the file currently loading, searched before the load path.")
+  "Source root of the file currently loading, searched before the load path.")
 
 (defun cljbang--ns->file (ns)
   "Relative file name for namespace NS, spelled as Clojure spells it."
   (concat (string-replace "-" "_" (string-replace "." "/" ns)) ".clj"))
+
+(defun cljbang--ns-root (ns)
+  "Source root implied by the loading file declaring namespace NS.
+A namespace path is relative to a root, not to the file's own directory,
+so cyc/a.clj declaring cyc.a puts the root above cyc/."
+  (when cljbang--load-file-name
+    (let ((rel (cljbang--ns->file ns))
+          (full cljbang--load-file-name))
+      (if (string-suffix-p rel full)
+          (substring full 0 (- (length full) (length rel)))
+        (file-name-directory full)))))
 
 (defun cljbang--find-ns-file (ns)
   "A readable .clj file for NS on the load path, or nil."
@@ -537,7 +551,9 @@ key is the pattern and the value is the map key to look up."
       ('quote form)
       ('comment nil)
       ('ns
-       (let ((name (symbol-name (cadr form))))
+       (let* ((name (symbol-name (cadr form)))
+              (cljbang--load-file-dir (or (cljbang--ns-root name)
+                                          cljbang--load-file-dir)))
          (setq cljbang--current-ns name)
          ;; register (:require [lib :as alias]) clauses
          (dolist (clause (cddr form))
@@ -753,7 +769,8 @@ Returns the value of the last form."
         ;; an (ns ...) in the file takes effect during the load only,
         ;; like Clojure's load-file preserving the caller's *ns*
         (cljbang--current-ns cljbang--current-ns)
-        ;; a :require in this file resolves against this file's directory
+        ;; the root a :require resolves against is derived from the ns
+        (cljbang--load-file-name (expand-file-name file))
         (cljbang--load-file-dir (file-name-directory (expand-file-name file))))
     (cljbang-eval-string src)))
 

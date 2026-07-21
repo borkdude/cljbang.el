@@ -394,9 +394,13 @@
   (setq cljbang--current-ns nil))
 
 (ert-deftest cljbang-test-require-cycle-terminates ()
+  "cyc.a and cyc.b require each other, so the guard has to break the loop."
   (clrhash cljbang--loaded-ns)
   (let ((dir (expand-file-name "test/requires/" cljbang-test--root)))
-    (should (cljbang-load-file (expand-file-name "cyc_a.clj" dir))))
+    (should (cljbang-load-file (expand-file-name "cyc/a.clj" dir))))
+  ;; proves the cycle was actually traversed, not silently skipped
+  (should (fboundp 'cyc-b-from-b))
+  (should (fboundp 'cyc-a-from-a))
   (setq cljbang--current-ns nil))
 
 (ert-deftest cljbang-test-as-alias-is-accepted ()
