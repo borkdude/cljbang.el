@@ -891,6 +891,79 @@ happens once unless RELOAD is non-nil."
        (dolist (pair pairs expansion)
          (setq expansion (list 'if (car pair) (cadr pair) expansion)))))))
 
+;; The test is bound to a gensym and destructured inside the branch, so it
+;; runs once and a pattern that binds nothing still decides the branch.
+(defun cljbang--if-let (binding then else)
+  "Expansion of if-let over BINDING, one pattern and one test, THEN and ELSE."
+  (unless (and (vectorp binding) (= 2 (length binding)))
+    (error "cljbang: if-let needs exactly one binding pair"))
+  (let ((test (gensym "cljbang-if-let-")))
+    (list 'let (vector test (aref binding 1))
+          (list 'if test
+                (list 'let (vector (aref binding 0) test) then)
+                else))))
+
+(cljbang--register-macro
+ "if-let" nil
+ (lambda (binding then &optional else) (cljbang--if-let binding then else)))
+
+(cljbang--register-macro
+ "when-let" nil
+ (lambda (binding &rest body) (cljbang--if-let binding (cons 'do body) nil)))
+
+;; seq-do rather than dolist, since the binding is a cljbang pattern and
+;; fn already destructures it.  Each clause wraps the ones after it, so
+;; later pairs nest and a :let or :when scopes over the rest, as in Clojure.
+(defun cljbang--doseq-clauses (clauses body)
+  "Body forms for the doseq CLAUSES that remain, wrapping BODY."
+  (if (zerop (length clauses))
+      body
+    (let ((head (aref clauses 0))
+          (form (aref clauses 1))
+          (more (substring clauses 2)))
+      (cond
+       ((eq head :let)
+        (list (cons 'let (cons form (cljbang--doseq-clauses more body)))))
+       ((eq head :when)
+        (list (cons 'when (cons form (cljbang--doseq-clauses more body)))))
+       ((keywordp head)
+        (error "cljbang: doseq does not support %s" head))
+       (t
+        (list (list 'do
+                    (list 'el/seq-do
+                          (cons 'fn (cons (vector head)
+                                          (cljbang--doseq-clauses more body)))
+                          form)
+                    nil)))))))
+
+(defun cljbang--doseq (bindings body)
+  "Expansion of doseq over BINDINGS, pairs and modifiers, and BODY."
+  (unless (and (vectorp bindings) (> (length bindings) 0)
+               (cl-evenp (length bindings))
+               (not (keywordp (aref bindings 0))))
+    (error "cljbang: doseq needs a binding pair first"))
+  (car (cljbang--doseq-clauses bindings body)))
+
+(defun cljbang--dotimes (binding body)
+  "Expansion of dotimes over BINDING, a name and a count, and BODY."
+  (unless (and (vectorp binding) (= 2 (length binding)))
+    (error "cljbang: dotimes needs exactly one binding pair"))
+  (let ((n (gensym "cljbang-n-"))
+        (i (gensym "cljbang-i-")))
+    (list 'let (vector n (aref binding 1) i 0)
+          (list 'el/while (list '< i n)
+                (cons 'let (cons (vector (aref binding 0) i) body))
+                (list 'set! i (list 'inc i)))
+          nil)))
+
+(cljbang--register-macro
+ "doseq" nil
+ (lambda (bindings &rest body) (cljbang--doseq bindings body)))
+
+(cljbang--register-macro
+ "dotimes" nil
+ (lambda (binding &rest body) (cljbang--dotimes binding body)))
+
 (cljbang--register-macro
  "with-out-str" nil
  (lambda (&rest body) (cons 'el/with-output-to-string body)))

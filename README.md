@@ -246,7 +246,7 @@ using `list` and `cons`:
 These ship as macros rather than compiler support:
 
 ```
-when cond -> ->> with-out-str time
+when cond if-let when-let doseq dotimes -> ->> with-out-str time
 ```
 
 ### Functions
@@ -340,6 +340,7 @@ Not implemented:
 
 - Syntax quote. Macros must build expansions with `list` and `cons`.
 - `:strs`, `:syms` and namespaced `:keys` destructuring.
+- The `:while` modifier in `doseq`, which `:let` and `:when` do support.
 - Protocols and multimethods.
 
 ## Benchmarks

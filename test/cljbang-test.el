@@ -389,6 +389,96 @@ keywords."
   (should (= 9 (cljbang-test--eval "(-> 1 (+ 2) (* 3))")))
   (should (equal '(2 3) (cljbang-test--eval "(->> [1 2] (map inc))"))))
 
+(ert-deftest cljbang-test-if-let ()
+  (should (= 1 (cljbang-test--eval "(if-let [x 1] x :n)")))
+  (should (eq :n (cljbang-test--eval "(if-let [x nil] x :n)")))
+  (should (null (cljbang-test--eval "(if-let [x nil] x)")))
+  (should (eq :n (cljbang-test--eval "(if-let [x (list)] :y :n)"))))
+
+(ert-deftest cljbang-test-when-let ()
+  (should (= 6 (cljbang-test--eval "(when-let [x 5] (inc x))")))
+  (should (eq :b (cljbang-test--eval "(when-let [x 1] :a :b)")))
+  (should (null (cljbang-test--eval "(when-let [x nil] :never)"))))
+
+(ert-deftest cljbang-test-if-let-destructures ()
+  (should (equal "h" (cljbang-test--eval "(when-let [{:keys [host]} {:host \"h\"}] host)")))
+  (should (= 3 (cljbang-test--eval "(if-let [[a b] [1 2]] (+ a b) :n)")))
+  (should (eq :n (cljbang-test--eval "(if-let [{:keys [a]} nil] a :n)"))))
+
+(ert-deftest cljbang-test-if-let-evaluates-the-test-once ()
+  (should (= 1 (cljbang-test--eval
+                "(def calls 0)
+                 (defn bump [] (set! calls (inc calls)) :v)
+                 (if-let [x (bump)] x)
+                 calls"))))
+
+(ert-deftest cljbang-test-if-let-takes-one-binding-pair ()
+  "Clojure's if-let binds one pair, unlike elisp's if-let*."
+  (should-error (cljbang-test--eval "(if-let [x 1 y 2] x :n)")))
+
+(ert-deftest cljbang-test-doseq ()
+  (should (equal "1\n2\n3\n"
+                 (cljbang-test--eval "(with-out-str (doseq [x [1 2 3]] (println x)))")))
+  (should (equal "1\n2\n"
+                 (cljbang-test--eval "(with-out-str (doseq [x (list 1 2)] (println x)))")))
+  (should (equal "" (cljbang-test--eval "(with-out-str (doseq [x nil] (println :never)))")))
+  (should (null (cljbang-test--eval "(doseq [x [1]] :v)"))))
+
+(ert-deftest cljbang-test-doseq-destructures ()
+  (should (equal "1 2\n"
+                 (cljbang-test--eval "(with-out-str (doseq [[a b] [[1 2]]] (println a b)))")))
+  (should (equal "1\n"
+                 (cljbang-test--eval "(with-out-str (doseq [{:keys [a]} [{:a 1}]] (println a)))"))))
+
+(ert-deftest cljbang-test-doseq-nests-later-pairs ()
+  (should (equal "1 :a\n1 :b\n2 :a\n2 :b\n"
+                 (cljbang-test--eval
+                  "(with-out-str (doseq [x [1 2] y [:a :b]] (println x y)))"))))
+
+(ert-deftest cljbang-test-doseq-when ()
+  (should (equal "1\n3\n"
+                 (cljbang-test--eval
+                  "(with-out-str (doseq [x [1 2 3] :when (odd? x)] (println x)))")))
+  (should (equal "" (cljbang-test--eval
+                     "(with-out-str (doseq [x [1] :when false] (println :never)))"))))
+
+(ert-deftest cljbang-test-doseq-let ()
+  (should (equal "10\n20\n"
+                 (cljbang-test--eval
+                  "(with-out-str (doseq [x [1 2] :let [y (* x 10)]] (println y)))")))
+  (should (equal "1\n2\n"
+                 (cljbang-test--eval
+                  "(with-out-str (doseq [x [1 2] :let [{:keys [a]} {:a x}]] (println a)))"))))
+
+(ert-deftest cljbang-test-doseq-modifiers-scope-over-the-rest ()
+  (should (equal "20\n30\n"
+                 (cljbang-test--eval
+                  "(with-out-str (doseq [x [1 2 3] :let [y (* x 10)] :when (> y 15)]
+                                   (println y)))")))
+  (should (equal "1 :a\n1 :b\n"
+                 (cljbang-test--eval
+                  "(with-out-str (doseq [x [1 2] :when (odd? x) y [:a :b]] (println x y)))"))))
+
+(ert-deftest cljbang-test-doseq-rejects-unsupported-modifiers ()
+  ":while is not implemented, and must not read as a pattern."
+  (should-error (cljbang-test--eval "(doseq [x [1] :while (odd? x)] x)"))
+  (should-error (cljbang-test--eval "(doseq [:when true x [1]] x)"))
+  (should-error (cljbang-test--eval "(doseq [x] x)")))
+
+(ert-deftest cljbang-test-dotimes ()
+  (should (equal "0\n1\n2\n"
+                 (cljbang-test--eval "(with-out-str (dotimes [i 3] (println i)))")))
+  (should (equal "" (cljbang-test--eval "(with-out-str (dotimes [i 0] (println :never)))")))
+  (should (null (cljbang-test--eval "(dotimes [i 3] :v)")))
+  (should-error (cljbang-test--eval "(dotimes [i 1 j 2] i)")))
+
+(ert-deftest cljbang-test-dotimes-binding-does-not-leak ()
+  (should (= 9 (cljbang-test--eval "(let [i 9] (dotimes [i 2] i) i)"))))
+
+(ert-deftest cljbang-test-loops-see-the-enclosing-scope ()
+  (should (= 6 (cljbang-test--eval "(let [n 0] (doseq [x [1 2 3]] (set! n (+ n x))) n)")))
+  (should (= 3 (cljbang-test--eval "(let [n 0] (dotimes [i 3] (set! n (inc n))) n)"))))
+
 (ert-deftest cljbang-test-if-when-do ()
   (should (eq :y (cljbang-test--eval "(if true :y :n)")))
   (should (null (cljbang-test--eval "(when false :y)")))
