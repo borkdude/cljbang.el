@@ -401,10 +401,17 @@
   (should (featurep 'subr-x))
   (setq cljbang--current-ns nil))
 
-(ert-deftest cljbang-test-require-missing-feature-is-not-fatal ()
-  "An alias may name a symbol prefix rather than something loadable."
+(ert-deftest cljbang-test-require-allows-builtin-prefixes ()
+  "Emacs built-ins have prefixes that name no feature, so string- is fine."
   (clrhash cljbang--loaded-ns)
-  (should (cljbang-test--eval "(ns reqmiss (:require [no-such-package-xyz :as n])) :ok"))
+  (should (cljbang-test--eval "(ns reqpfx (:require [string :as s])) :ok"))
+  (should (equal "hi" (cljbang-test--eval "(s/trim \"  hi  \")")))
+  (setq cljbang--current-ns nil))
+
+(ert-deftest cljbang-test-require-rejects-typos ()
+  "Nothing loadable and nothing defined under the prefix means a mistake."
+  (clrhash cljbang--loaded-ns)
+  (should-error (cljbang-test--eval "(ns reqmiss (:require [no-such-package-xyz :as n]))"))
   (setq cljbang--current-ns nil))
 
 (ert-deftest cljbang-test-require-skips-builtin-namespaces ()

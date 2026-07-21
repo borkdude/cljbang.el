@@ -113,19 +113,33 @@ so cyc/a.clj declaring cyc.a puts the root above cyc/."
                   (and (file-readable-p f) f)))
               (delq nil (cons cljbang--load-file-dir cljbang-load-path)))))
 
+(defun cljbang--prefix-in-use-p (ns)
+  "Whether any bound symbol is named with NS as an elisp prefix.
+Emacs has whole families of built-ins whose prefix names no feature, so
+string- and buffer- are legitimate aliases with nothing to load."
+  (let ((prefix (concat (cljbang--munge-ns ns) "-")))
+    (catch 'cljbang--found
+      (mapatoms (lambda (sym)
+                  (when (and (string-prefix-p prefix (symbol-name sym))
+                             (or (fboundp sym) (boundp sym)))
+                    (throw 'cljbang--found t))))
+      nil)))
+
 (defun cljbang--require-ns (ns)
   "Load NS: a .clj file when one is on the load path, else an elisp feature.
-A missing elisp feature is not an error, since an alias may name a plain
-symbol prefix rather than something loadable."
+An alias for a prefix that names no feature is allowed when something is
+actually defined under it, so a typo is still an error."
   (unless (or (gethash ns cljbang--loaded-ns)
               ;; namespaces cljbang implements itself
               (rassoc ns cljbang--ns-aliases))
     ;; marked before loading, so a cycle terminates
     (puthash ns t cljbang--loaded-ns)
     (let ((file (cljbang--find-ns-file ns)))
-      (if file
-          (cljbang-load-file file)
-        (require (intern ns) nil 'noerror)))))
+      (cond (file (cljbang-load-file file))
+            ((require (intern ns) nil 'noerror))
+            ((cljbang--prefix-in-use-p ns))
+            (t (error "cljbang: cannot require %s, no such file, feature or %s- name"
+                      ns (cljbang--munge-ns ns)))))))
 
 ;; Elisp spells the distinction Clojure draws with defn- : one dash for
 ;; the public API, two for what is internal to a package.  Public is the

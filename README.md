@@ -15,7 +15,8 @@ This project is heavily influenced by how I wrote [Squint](https://squint-cljs.g
 My previous attempt at a similar project to bring Clojure to Elisp involved a
 transpiler. But I don't think using a transpiler in Emacs is user friendly for
 writing quick functions and scripts.  Instead this project is a lite compiler
-sitting in your elisp runtime and integrates tightly with it.
+sitting in your elisp runtime and integrates tightly with it. You can just evaluate "Clojure" (in the cljbang dialect) as Elisp in a `.clj` buffer.
+
 
 ## Installation
 
@@ -139,10 +140,19 @@ Requiring an Emacs package loads it, and the alias saves you the prefix:
 (m/status)                       ;; calls magit-status
 ```
 
-A require happens once, so cycles terminate. A missing elisp feature is
-not an error, since an alias may name a symbol prefix rather than
-something loadable. Use `:as-alias` to name a namespace without loading
-it, as in Clojure.
+A require happens once, so cycles terminate. Use `:as-alias` to name a
+namespace without loading it, as in Clojure.
+
+Many Emacs built-ins have a prefix that names no feature, so aliasing one
+is allowed as long as something is defined under it:
+
+```clojure
+(ns my.config (:require [string :as s]))
+(s/trim "  hi  ")        ;; calls string-trim, nothing to load
+```
+
+A name that is neither a file, nor a feature, nor a prefix in use is a
+typo, and cljbang says so rather than failing later at the call site.
 
 Order matters, because a file is compiled and evaluated one form at a
 time. The `ns` form runs its requires before anything below it, so a
