@@ -516,12 +516,9 @@ key is the pattern and the value is the map key to look up."
          ,@(cljbang--compile-recur-body (remq '&rest arglist)
                                         (nreverse pairs) body env*)))))
 
-  ;; A syntax quote builds the form rather than quoting it: every part is
-;; quoted except what an unquote marks, so the result is code the caller
-;; can splice.  Symbols stay bare, the way a macro written with list and
-;; cons emits them, and the compiler resolves them when the expansion is
-;; compiled.  A trailing # gives one gensym per name per template, which
-;; is what keeps a macro from capturing a binding.
+;; A syntax quote builds the form rather than quoting it: every part is
+;; quoted except what an unquote marks.  A trailing # gives one gensym per
+;; name per template, which is what keeps a macro from capturing a binding.
 
 (defun cljbang--auto-gensym (sym gensyms)
   "Gensym for SYM, a name ending in #, the same one throughout GENSYMS."
@@ -531,8 +528,24 @@ key is the pattern and the value is the map key to look up."
                  (gensym (concat (substring name 0 -1) "-"))
                  gensyms))))
 
-(defconst cljbang--template-bare '(& % %1 %2 %3 %4 %&)
-  "Names a template leaves alone, being parameter syntax rather than vars.")
+(defconst cljbang--template-bare
+  '(& cljbang-re-pattern cljbang-deref
+    cljbang--map-literal cljbang--set-literal)
+  "Names a template leaves alone: & as Clojure leaves it, and what the
+reader put there, which is resolved already.")
+
+(defun cljbang--template-qualified (sym)
+  "SYM with its alias expanded, still qualified.
+el/ and a name already spelled in full are left as they are, and either
+way nothing unqualified can take the place of one."
+  (let ((parts (split-string (symbol-name sym) "/")))
+    (if (or (cljbang--el-symbol sym) (not (= (length parts) 2)))
+        sym
+      (pcase-let ((`(,ns ,n) parts))
+        (if-let* ((full (or (cdr (assq (intern ns) (cljbang--ns-aliases)))
+                            (cdr (assq (intern ns) cljbang--ns-default-aliases)))))
+            (intern (concat full "/" n))
+          sym)))))
 
 (defun cljbang--template-symbol (sym)
   "SYM as a template should carry it, qualified to the current namespace.
@@ -544,7 +557,9 @@ carries a host name, the way Clojure leaves interop alone."
     (cond
      ((memq sym cljbang--template-bare) sym)
      ((member name cljbang--special-forms) sym)
-     ((string-search "/" name) (or (ignore-errors (cljbang--qualified sym)) sym))
+     ;; a qualified name stays qualified, with only its alias expanded, so
+     ;; it means the same thing without being flattened here
+     ((string-search "/" name) (cljbang--template-qualified sym))
      ;; the defined var wins, since it knows whether defn- spelled it private
      ((cljbang--ns-resolve sym))
      ;; a core function resolves, or a var of that name where the macro
@@ -576,6 +591,8 @@ carries a host name, the way Clojure leaves interop alone."
            (t (list 'quote (cljbang--template-symbol form)))))
     ((pred vectorp)
      (list 'vec (cljbang--template-seq (append form nil) gensyms)))
+    (`(cljbang--fn-literal . ,_)
+     (error "cljbang: #() inside a syntax quote does not work, use (fn [x#] ...)"))
     (`(cljbang--map-literal . ,kvs)
      (list 'apply 'hash-map (cljbang--template-seq kvs gensyms)))
     (`(cljbang--set-literal . ,xs)
@@ -1073,7 +1090,11 @@ a match followed by that character, which is how ~ leaves ~@ alone."
                              (eq (char-after (+ beg (length prefix))) not-before)))
                    (or (not token-start)
                        (= beg (point-min))
-                       (memq (char-before beg) '(?\s ?\t ?\n ?\( ?\[ ?{))))
+                       ;; a quote opens a token as readily as a delimiter
+                       ;; does, which is what `@x needs.  Not ~, whose @
+                       ;; belongs to the splice that was matched already
+                       (memq (char-before beg)
+                             '(?\s ?\t ?\n ?\( ?\[ ?{ ?` ?\'))))
           (goto-char (+ beg skip))
           (when-let* ((end (ignore-errors
                              (save-excursion (forward-sexp) (point)))))

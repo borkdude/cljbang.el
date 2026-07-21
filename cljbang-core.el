@@ -54,10 +54,8 @@
   (plist-get (cljbang--ns-entry ns) :vars))
 
 ;; Munging is not reversible: (ns a-b) with c and (ns a) with b-c both
-;; give a-b-c, as they would in elisp, where nothing tells you whether
-;; org-agenda-files belongs to org-agenda or to org.  An index of what
-;; each symbol was interned as turns the second one into a warning rather
-;; than a definition that quietly replaces the first.
+;; intern a-b-c.  An index of what each symbol was interned as makes the
+;; second definition warn rather than replace the first in silence.
 
 (defun cljbang--interned-table ()
   "Interned symbol -> the (NAMESPACE . NAME) it was interned as."

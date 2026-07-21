@@ -189,10 +189,9 @@ Warning (cljbang): magti/status resolves to magti-status, which is not defined
 
 `cljbang-warn-unresolved` turns that off.
 
-Munging is not reversible, so `(ns a-b)` with `c` and `(ns a)` with `b-c`
-both want `a-b-c`, the way nothing tells you whether `org-agenda-files`
-belongs to `org-agenda` or to `org`. The second one warns rather than
-replacing the first:
+Munging is not reversible: `(ns a-b)` with `c` and `(ns a)` with `b-c`
+both intern `a-b-c`. The second definition warns before replacing the
+first:
 
 ```
 Warning (cljbang): a/b-c interns a-b-c, already a-b/c
@@ -251,13 +250,8 @@ Build a macro with a syntax quote, unquoting with `~` and `~@`:
 (twice 3)                                  ;; => 6
 ```
 
-An unqualified name is qualified to the namespace where the macro is
-written, not where it expands, so a macro can call its own namespace's
-functions from anywhere. The var does not have to exist yet. A core
-function and a macro cljbang ships both resolve to what they name, so
-neither can be taken by a name where the macro expands. Special forms are
-matched before anything is resolved, so `let` and `if` stay as they are.
-A host name takes `el/`:
+A syntax quote resolves unqualified names in the macro's namespace,
+including vars defined later. Use `el/` for Emacs Lisp names:
 
 ```clojure
 (ns my.config)
@@ -378,9 +372,6 @@ Lisp semantics:
 (into {} [[:a 1]])     ;; an error. A map and a set are both hash tables,
                        ;;    so conj cannot tell assoc from adding the pair
 (symbol? :a)           ;; => nil, a keyword is a symbol in elisp, not here
-`(el/message "hi")     ;; a syntax quote qualifies to the namespace, as Clojure
-                       ;;    does, so a host name needs el/ the way Clojure
-                       ;;    needs .method
 
 (get '((:a . 1)) :a)   ;; => 1, an alist reads as a map
 (get '((1 2) (3 4)) 1) ;; => (2), and so does a list of lists. Clojure
@@ -388,8 +379,10 @@ Lisp semantics:
                        ;;    both sequences and maps
 ```
 
-Inside `clj!` there is no source text to rewrite, so use `hash-set` and
-`fn`, or move the code to a `.clj` file:
+Inside `clj!` there is no source text to rewrite, so no reader macro
+works there: `#{}`, `#()`, `#""`, `` ` ``, `~`, `~@` and `@`. Use
+`hash-set`, `fn`, `re-pattern`, `list` and `deref`, or move the code to a
+`.clj` file:
 
 ```clojure
 (clj! #{1 2})       ;; read error

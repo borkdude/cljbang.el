@@ -354,6 +354,7 @@ keywords."
   (should (equal '(a) (cljbang-test--eval "(let [xs []] `(a ~@xs))"))))
 
 (ert-deftest cljbang-test-syntax-quote-over-collections ()
+  (cljbang--set-current-ns nil)
   (should (equal [a 1] (cljbang-test--eval "(let [x 1] `[a ~x])")))
   (should (= 1 (cljbang-test--eval "(let [x 1] (get `{:a ~x} :a))")))
   (should (= 2 (cljbang-test--eval "(count `#{1 2})")))
@@ -443,12 +444,16 @@ cannot take it."
   "An unqualified name is a var of the namespace, so elisp needs el/."
   (cljbang-test--eval "(ns sqhost)")
   (should (eq 'sqhost-propertize (cljbang-test--eval "`propertize")))
-  (should (equal '(message "hi") (cljbang-test--eval "`(el/message \"hi\")")))
+  ;; a qualified name stays qualified, as it does in Clojure
+  (should (equal '(el/message "hi") (cljbang-test--eval "`(el/message \"hi\")")))
+  (should (eq 'el/message (cljbang-test--eval "`el/message")))
   (cljbang--set-current-ns nil))
 
 (ert-deftest cljbang-test-syntax-quote-expands-an-alias ()
+  "The alias becomes the namespace it names, and the name stays qualified."
   (cljbang-test--eval "(ns sqalias)")
-  (should (eq 'cljbang-string-join (cljbang-test--eval "`str/join")))
+  (should (eq 'clojure.string/join (cljbang-test--eval "`str/join")))
+  (should (equal "a,b" (cljbang-test--eval "(defmacro j [] `(str/join \",\" [\"a\" \"b\"])) (j)")))
   (cljbang--set-current-ns nil))
 
 (ert-deftest cljbang-test-a-macro-expands-in-another-namespace ()
@@ -492,6 +497,30 @@ cannot take it."
 (ert-deftest cljbang-test-unquote-outside-a-syntax-quote ()
   (should-error (cljbang-test--eval "~x"))
   (should-error (cljbang-test--eval "(list ~x)")))
+
+(ert-deftest cljbang-test-syntax-quote-keeps-what-the-reader-put-there ()
+  "A regex or a deref is resolved already, so a template leaves it alone."
+  (cljbang-test--eval "(ns sqreader)")
+  (should (equal '(cljbang-re-pattern "a+") (cljbang-test--eval "`#\"a+\"")))
+  (should (equal "aaa" (cljbang-test--eval
+                        "(defmacro pat [] `(re-find #\"a+\" \"baaa\")) (pat)")))
+  (should (equal '(cljbang-deref sqreader-x) (cljbang-test--eval "`@x")))
+  (should (= 7 (cljbang-test--eval
+                "(defmacro getv [x] `@~x) (let [a (atom 7)] (getv a))")))
+  (cljbang--set-current-ns nil))
+
+(ert-deftest cljbang-test-fn-literal-in-a-template-is-refused ()
+  "Its % parameters cannot survive being qualified, so say so."
+  (cljbang-test--eval "(ns sqfnlit)")
+  (should-error (cljbang-test--eval "`#(+ % 1)"))
+  (cljbang--set-current-ns nil))
+
+(ert-deftest cljbang-test-syntax-quote-qualifies-percent ()
+  "As Clojure does, where `% is user/%.  Only & is left alone."
+  (cljbang-test--eval "(ns sqpct)")
+  (should (eq 'sqpct-% (cljbang-test--eval "`%")))
+  (should (eq '& (cljbang-test--eval "`&")))
+  (cljbang--set-current-ns nil))
 
 (ert-deftest cljbang-test-nested-syntax-quote-is-refused ()
   (should-error (cljbang-test--eval "``a")))
