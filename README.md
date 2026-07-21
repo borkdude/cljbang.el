@@ -76,15 +76,13 @@ or:
 (cljbang-require 'example)
 ```
 
-The compiled result is cached beside the file as
-`example.clj.30-0.0.1.elc` and reused until you edit the source, so this
-costs about what loading the equivalent elisp would. The name carries the
-Emacs version and the cljbang version, so upgrading either one rebuilds
-rather than loading output the current compiler would not produce. 
+The compiled result is cached beside the file as `example.clj.30-0.0.1.elc` and
+reused until you edit the source, so this costs about what loading the
+equivalent elisp would. The name carries the Emacs version and the cljbang
+version, so upgrading either one rebuilds rather than loading output the current
+compiler would not produce. The `.elc` files this produces, you can ignore in
+version control.
 
-```
-*.clj.*.elc
-```
 
 Then in your `example.clj` just put this line to enable `C-x C-e` to get inline evaluation working:
 
@@ -92,9 +90,9 @@ Then in your `example.clj` just put this line to enable `C-x C-e` to get inline 
 ;; -*- mode: clojure; cljbang-whole-buffer: t -*-
 ```
 
-### Where the definitions go
+### Interning
 
-`defn` and `def` intern real elisp symbols, so anything the file defines is
+In Cljbang, `defn` and `def` intern real elisp symbols, so anything the file defines is
 callable from elisp afterwards. Without an `ns` form the name is used as is:
 
 ```clojure
@@ -150,10 +148,10 @@ A file with no `ns` form can require at the top level, and elisp can too:
 (cljbang-require 'lib.b)
 ```
 
-### Requiring
+### Require
 
-A `:require` loads what it names. Cljbang looks for a `.clj` file first,
-relative to the requiring file and then along `cljbang-load-path`, and
+A `:require` loads either a cljbang `.clj` file or an elisp library, in that order.
+Cljbang looks for a `.clj` file first, relative to the requiring file and then along `cljbang-load-path`, and
 falls back to loading an elisp feature of that name.
 
 ```clojure
@@ -307,7 +305,9 @@ hash-map hash-set load-file
 require for it:
 
 ```
-join split replace upper-case lower-case capitalize trim blank?
+join split split-lines replace blank? includes? starts-with? ends-with?
+index-of last-index-of upper-case lower-case capitalize reverse
+trim triml trimr trim-newline
 ```
 
 ```clojure

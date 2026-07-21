@@ -466,6 +466,23 @@
       (setq cljbang--current-ns nil))))
 
 
+(ert-deftest cljbang-test-clojure-string ()
+  "Checked against Clojure, including the argument orders elisp reverses."
+  (should (cljbang-test--eval "(str/includes? \"hello\" \"ell\")"))
+  (should-not (cljbang-test--eval "(str/includes? \"hello\" \"z\")"))
+  (should (cljbang-test--eval "(str/starts-with? \"hello\" \"he\")"))
+  (should (cljbang-test--eval "(str/ends-with? \"hello\" \"lo\")"))
+  (should (= 2 (cljbang-test--eval "(str/index-of \"hello\" \"l\")")))
+  ;; nil when absent, not -1
+  (should-not (cljbang-test--eval "(str/index-of \"hello\" \"z\")"))
+  (should-not (cljbang-test--eval "(str/index-of \"hello\" \"l\" 4)"))
+  (should (= 3 (cljbang-test--eval "(str/last-index-of \"hello\" \"l\")")))
+  (should (equal "a  " (cljbang-test--eval "(str/triml \"  a  \")")))
+  (should (equal "  a" (cljbang-test--eval "(str/trimr \"  a  \")")))
+  (should (equal "a" (cljbang-test--eval "(str/trim-newline \"a\\n\")")))
+  (should (equal ["a" "b"] (cljbang-test--eval "(str/split-lines \"a\\nb\")")))
+  (should (equal "cba" (cljbang-test--eval "(str/reverse \"abc\")"))))
+
 ;;; Namespaces
 
 (ert-deftest cljbang-test-ns-interns-munged-names ()
