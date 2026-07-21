@@ -9,11 +9,12 @@ Cljbang (`clj!`) compiles Clojure forms to Emacs Lisp forms and evaluates them i
 running Emacs. There is no subprocess, no transpiled text, and no runtime
 beyond `cljbang-core.el` itself.
 
-This project is heavily influenced by how I wrote [Squint](https://squint-cljs.github.io/squint/) and adopts its philosophy:
+Cljbang follows the same approach as [Squint](https://squint-cljs.github.io/squint/):
 
-- Embrace the host and its data structures: interop should be first class without transforming between islands
-- Light-weight: compilation is fast and a byte-compiled file almost no extra load/startup costs compared to elisp
-- Performance first: compiled output should run fast, in the same ballpark as elisp
+- Interop uses Emacs Lisp data structures directly.
+- Functions defined in cljbang are callable from Emacs Lisp and vice versa.
+- Compilation is fast, and byte-compiled files load about as fast as Emacs Lisp.
+- Compiled code runs about as fast as Emacs Lisp.
 
 ![A .clj buffer in Emacs, evaluated inline](doc/screenshot.webp)
 
@@ -50,9 +51,8 @@ Requires Emacs 28.1 or later.
   :vc (:url "https://github.com/borkdude/cljbang.el"))
 ```
 
-From a clone, put the directory on the load path and require what you
-need. `cljbang-mode` pulls in the compiler and the runtime, so it is the
-one to ask for if you want inline evaluation:
+From a clone, add the directory to `load-path` and require `cljbang-mode`
+for inline evaluation. It loads the compiler and runtime:
 
 ```emacs-lisp
 (add-to-list 'load-path "~/dev/cljbang.el")
@@ -78,9 +78,9 @@ You can use the `clj!` macro directly inside an elisp buffer:
 ;; => :bob
 ```
 
-This defines a function straight into your elisp file.
+This defines `winner` in the running Emacs.
 
-Cljbang gives a better overall feeling when you move the source code to a `.clj` file and then load that file with:
+For regular use, put the source code in a `.clj` file and load it with:
 
 ```emacs-lisp
 (cljbang-load-file "example.clj")
@@ -97,7 +97,7 @@ reused until you edit the source, so this costs about what loading the
 equivalent elisp would. The name carries the Emacs and cljbang versions,
 so upgrading either rebuilds. Ignore `*.clj.*.elc` in version control.
 
-Then in your `example.clj` just put this line to enable `C-x C-e` to get inline evaluation working:
+Add this file-local variable to `example.clj` to enable inline evaluation with `C-x C-e`:
 
 ```clojure
 ;; -*- mode: clojure; cljbang-whole-buffer: t -*-
@@ -145,16 +145,16 @@ Destructuring reads an alist, which is the shape Emacs passes around:
 (port '((:host . "localhost") (:port . 8080)))   ;; => "localhost:8080"
 ```
 
-A plist does not, because every list of keywords would look like one. A
-map that cljbang builds is a hash table, so elisp reading one back uses
-`gethash`.
+Associative destructuring does not accept plists because they are
+ambiguous with ordinary lists. A map that cljbang builds is a hash table,
+so elisp reading one back uses `gethash`.
 
 
 ### Require
 
-A `:require` loads a `.clj` file if it finds one, relative to the
-requiring file and then along `cljbang-load-path`, and otherwise an elisp
-feature of that name. `lib.some-thing` is `lib/some_thing.clj`.
+A `:require` first looks for a `.clj` file relative to the requiring file,
+then on `cljbang-load-path`. If none exists, it loads an Emacs Lisp feature
+with that name. `lib.some-thing` is `lib/some_thing.clj`.
 
 ```clojure
 (ns my.config
@@ -208,9 +208,9 @@ el/tab-width                            ; a variable, not a function
 (set! el/my/some-var 42)                ; slash preserved
 ```
 
-`el` is not a Clojure namespace, and a package reached through
-`:as-alias` is never loaded as far as clj-kondo is concerned. Both are
-fine here, so in your own `.clj-kondo/config.edn`:
+clj-kondo reports `el` as an unresolved namespace and warns when vars are
+called through `:as-alias`. Disable those warnings in
+`.clj-kondo/config.edn`:
 
 ```clojure
 {:linters {:unresolved-namespace {:exclude [el]}
@@ -218,8 +218,6 @@ fine here, so in your own `.clj-kondo/config.edn`:
 ```
 
 ## Standard library
-
-In this section we list the currently supported Clojure-like standard library.
 
 Cljbang has these special forms:
 
@@ -263,8 +261,7 @@ re-pattern re-find re-matches re-seq
 hash-map hash-set load-file
 ```
 
-`clojure.string`, aliased to `str` out of the box, so `clj!` needs no
-require for it:
+`clojure.string` is available as `str` without a `require`:
 
 ```
 join split split-lines replace blank? includes? starts-with? ends-with?
@@ -276,12 +273,17 @@ trim triml trimr trim-newline
 (str/join ", " ["a" "b"])   ;; => "a, b"
 ```
 
-`str` is the only alias predefined. Any other alias comes from a
-`:require`, which also means `clj!` cannot use one, having no ns form.
+`str` is the only predefined alias. Any other comes from a `:require`,
+which `clj!` can carry too:
 
-Map and set literals, destructuring (sequential and associative, nested,
-in `let` and in fn params), and sets, maps, keywords and vectors called as
-functions.
+```emacs-lisp
+(clj! (ns my.config (:require [magit :as m]))
+      (m/status))
+```
+
+Cljbang supports map and set literals and nested sequential and associative
+destructuring in `let` bindings and function parameters. Sets, maps,
+keywords and vectors can be called as functions.
 
 ```clojure
 (#{1 2 3} 1)                ;; => 1
@@ -308,7 +310,8 @@ Anonymous function literals, with `%`, `%1`, `%2` and `%&`:
 
 ## Differences from Clojure
 
-Host semantics win where they conflict, unless otherwise noted, like in Squint.
+When Clojure and Emacs Lisp semantics differ, cljbang usually uses Emacs
+Lisp semantics:
 
 ```clojure
 (/ 1 2)             ;; => 0, elisp division, no ratios
@@ -333,10 +336,10 @@ Inside `clj!` there is no source text to rewrite, so use `hash-set` and
 (clj! (hash-set 1 2))
 ```
 
-Not implemented (currently):
+Not implemented:
 
-- syntax quote, so macros build expansions with `list` and
-`cons`. `:strs`, `:syms` and namespaced `:keys`.
+- Syntax quote. Macros must build expansions with `list` and `cons`.
+- `:strs`, `:syms` and namespaced `:keys` destructuring.
 - Protocols and multimethods.
 
 ## Benchmarks
@@ -356,9 +359,9 @@ and `bb bench`.
 | plain elisp | 0.36 ms |
 
 Compiled output is plain elisp, so once the cache is warm the overhead is
-about a millisecond at load and ten percent at run time. Collection code
-is further off, since `map` and `filter` dispatch through a wrapper and
-`assoc` copies.
+about a millisecond at load and ten percent at run time. Collection
+operations are slower because `map` and `filter` dispatch through a wrapper
+and `assoc` copies maps.
 
 ## Test
 
