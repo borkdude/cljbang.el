@@ -1,6 +1,6 @@
 ;;; cljbang.el --- Clojure that runs as Emacs Lisp -*- lexical-binding: t; -*-
 
-;; Version: 0.0.6
+;; Version: 0.0.7
 ;; Package-Requires: ((emacs "28.1"))
 ;; Homepage: https://github.com/borkdude/cljbang.el
 ;; Keywords: languages, lisp
@@ -1399,7 +1399,7 @@ first is cheaper than building a token list for every one."
         (end-of-file (setq pos (length src))))) ; trailing comment
     (nreverse forms)))
 
-(defconst cljbang-version "0.0.6"
+(defconst cljbang-version "0.0.7"
   "Version of cljbang, which a compiled cache is keyed on.")
 
 (defun cljbang--cache-file (file)
