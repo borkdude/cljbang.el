@@ -125,6 +125,19 @@
 (defvar cljbang--expanding 0
   "Depth of macro expansion, to catch a macro that expands to itself.")
 
+;; &form and &env, bound while a macro expands.  &form is the whole call,
+;; &env a map of the locals in scope, as in Clojure, so (keys &env) works.
+(defvar cljbang--macro-form nil "The macro call form, while a macro expands.")
+(defvar cljbang--macro-env nil "The locals in scope, as a list, while a macro expands.")
+
+(defun cljbang--env-map (env)
+  "The locals in ENV as a map, its keys the local names.
+A real hash table, cljbang's map type, so map? assoc and merge all work.
+Built only when a macro reads &env at all, so most macros pay nothing."
+  (let ((h (make-hash-table :test #'equal)))
+    (dolist (s env h)
+      (unless (memq s '(&form &env)) (puthash s s h)))))
+
 (defun cljbang--munge-ns (ns)
   (string-replace "." "-" ns))
 
@@ -898,7 +911,9 @@ nothing, as it does in Clojure, and so does a name cljbang never saw."
 
 (defun cljbang--compile-symbol (form env)
   "Compile FORM in value position."
-  (cond ((memq form env) form)
+  (cond ((eq form '&form) 'cljbang--macro-form)
+        ((eq form '&env) '(cljbang--env-map cljbang--macro-env))
+        ((memq form env) form)
         ;; a name may be a def as readily as a defn, so resolve it the
         ;; lisp-1 way rather than assuming #', which a core function can
         ;; take since it is always a function
@@ -936,7 +951,9 @@ nothing, as it does in Clojure, and so does a name cljbang never saw."
         (progn
           (when (> cljbang--expanding 100)
             (error "cljbang: %s expands without end" head))
-          (let ((cljbang--expanding (1+ cljbang--expanding)))
+          (let ((cljbang--expanding (1+ cljbang--expanding))
+                (cljbang--macro-form form)
+                (cljbang--macro-env env))
             (cljbang-compile (apply expander (cdr form)) env)))
       (let ((args (cljbang--compile-body (cdr form) env)))
         (cond

@@ -641,6 +641,32 @@ cannot take it."
 
 ;;; Macros
 
+(ert-deftest cljbang-test-macro-form ()
+  "&form is the whole macro call, as in Clojure."
+  (should (equal '(mform 5)
+                 (cljbang-test--eval "(defmacro mform [x] (list 'quote &form)) (mform 5)")))
+  (should (equal '(mf (+ 1 2) :k)
+                 (cljbang-test--eval "(defmacro mf [a b] (list 'quote &form)) (mf (+ 1 2) :k)"))))
+
+(ert-deftest cljbang-test-macro-env ()
+  "&env is a map of the locals in scope, so (keys &env) lists them."
+  (should (equal '("a" "b")
+                 (cljbang-test--eval
+                  "(defmacro me [x] (list 'quote (sort (map name (keys &env)))))
+                   (let [a 1 b 2] (me a))")))
+  (should (cljbang-test--eval
+           "(defmacro mc [x] (list 'quote (contains? &env 'a))) (let [a 1] (mc a))"))
+  (should (= 0 (cljbang-test--eval
+                "(defmacro m0 [] (list 'quote (count (keys &env)))) (m0)"))))
+
+(ert-deftest cljbang-test-macro-env-is-a-real-map ()
+  "&env is a map, so map?, assoc and the rest work, as in Clojure."
+  (should (cljbang-test--eval
+           "(defmacro m1 [x] (list 'quote (map? &env))) (let [a 1] (m1 a))"))
+  (should (cljbang-test--eval
+           "(defmacro m2 [x] (list 'quote (contains? (assoc &env 'z 9) 'z)))
+            (let [a 1] (m2 a))")))
+
 (ert-deftest cljbang-test-defmacro ()
   "A macro sees its arguments unevaluated and its expansion is compiled."
   (should (= 6 (cljbang-test--eval "(defmacro twice [x] (list '+ x x)) (twice 3)")))
