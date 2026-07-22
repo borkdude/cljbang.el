@@ -191,8 +191,7 @@ Warning (cljbang): a/b-c interns a-b-c, already a-b/c
 
 ## Interop
 
-`el/` reaches the host environment explicitly, the way `js/` does in
-ClojureScript:
+Use `el/` to access Emacs Lisp names explicitly:
 
 ```clojure
 (el/propertize "hi" 'face 'bold)
@@ -202,14 +201,11 @@ el/tab-width                            ; a variable, not a function
 (set! el/my/some-var 42)                ; slash preserved
 ```
 
-A bare name cljbang does not define also compiles to a plain elisp
-call, so `(propertize ...)` works as well. clj-kondo cannot know that,
-so `el/` is the spelling the linter understands.
+Unknown bare calls also fall through to Emacs Lisp. Use `el/` to avoid
+unresolved-symbol warnings from clj-kondo.
 
-`el!` embeds elisp itself, for the macros whose arguments are not
-expressions. `(clj! ...)` is the door back, compiled in place with the
-surrounding scope, and a backquote inside is elisp's own, with `~` and
-`~@` standing for `,` and `,@`:
+Use `el!` for Emacs Lisp macros. A nested `clj!` compiles a cljbang
+expression in the surrounding scope:
 
 ```clojure
 (el! (use-package magit
@@ -217,16 +213,16 @@ surrounding scope, and a backquote inside is elisp's own, with `~` and
 
 (let [n 3]
   (el! (cl-loop repeat (clj! n) collect :x)))
+```
 
+Inside `el!`, backquote has Emacs Lisp semantics. Write `~` and `~@`
+where Emacs Lisp uses `,` and `,@`:
+
+```clojure
 (def todo-file "~/todo.org")
 (el! (setq org-capture-templates
            `(("t" "Todo" entry (file ~(clj! todo-file)) "* TODO %?"))))
 ```
-
-Reach for `el!` when an elisp macro demands it; cljbang's own forms
-cover the rest. From elisp, `clj!` is the same door the other way, as
-under Usage. There it sees no elisp locals, and unqualified names
-resolve in `cljbang-user`.
 
 ## Standard library
 
@@ -424,37 +420,34 @@ package files.
 
 ## Clj-kondo
 
-Cljbang ships a clj-kondo configuration. Add the repo to a `deps.edn`
-and import it:
+Cljbang includes a clj-kondo configuration. Add cljbang to `deps.edn`,
+then import its configuration:
 
 ```clojure
 {:deps {io.github.borkdude/cljbang.el {:git/tag "..." :git/sha "..."}}}
 ```
 
-```
+```shell
 mkdir -p .clj-kondo
 clj-kondo --lint "$(clojure -Spath)" --copy-configs --skip-lint
 ```
 
-Without a JVM, `:config-paths` in `.clj-kondo/config.edn` pointing at a
-checkout works too:
-`["/path/to/cljbang/resources/clj-kondo.exports/borkdude/cljbang"]`.
+Alternatively, point `.clj-kondo/config.edn` at a checkout:
 
-Require `cljbang.core` with `:refer`, so `el!` and `clj!` resolve:
+```clojure
+{:config-paths
+ ["/path/to/cljbang/resources/clj-kondo.exports/borkdude/cljbang"]}
+```
+
+For clj-kondo, refer `el!` and `clj!` from `cljbang.core`:
 
 ```clojure
 (ns my.config
   (:require [cljbang.core :refer [el! clj!]]))
 ```
 
-The require loads nothing, since cljbang implements that namespace
-itself.
-
-Inside `el!` only the `(clj! ...)` parts are linted as Clojure. The
-elisp around them is invisible, so a binding used by bare elisp alone
-reads as unused, where `(clj! n)` counts as a use. A backquote inside
-`el!` is elisp's own and is left alone, and a `~` outside one is
-reported with the compiler's message.
+Within `el!`, clj-kondo analyzes only nested `clj!` forms. Emacs Lisp
+references do not count as uses of cljbang bindings.
 
 ## Benchmarks
 
