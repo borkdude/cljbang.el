@@ -669,16 +669,14 @@ stay as they are."
           (t (cons 'concat parts)))))
 
 (defun cljbang--el-template (form env)
-  "FORM as the elisp it already is, with ~ compiled as cljbang.
-The mirror image of a syntax quote: everything is host code taken
-verbatim, and an unquote is the door back into cljbang."
+  "FORM as the elisp it already is, with (clj! ...) back into cljbang.
+The mirror image of clj!: everything is host code taken verbatim, and
+the other door, compiled here and now with the environment, is the one
+way back."
   (pcase form
-    (`(cljbang--unquote ,x) (cljbang-compile x env))
-    ;; the other door works from this side too, compiled here and now,
-    ;; with the environment, rather than expanded by elisp later without
     (`(clj! . ,body) (cljbang-compile (cons 'do body) env))
-    (`(cljbang--unquote-splicing ,_)
-     (error "cljbang: ~@ has no meaning inside el!"))
+    ((or `(cljbang--unquote ,_) `(cljbang--unquote-splicing ,_))
+     (error "cljbang: inside el! the door back is (clj! ...), not ~"))
     ((or `(cljbang--map-literal . ,_) `(cljbang--set-literal . ,_))
      (error "cljbang: {} and #{} are cljbang literals, not elisp; build one with ~"))
     ((pred vectorp)

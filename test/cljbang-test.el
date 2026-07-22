@@ -656,14 +656,15 @@ cannot take it."
                           (list 'quote (cons name props))))
                    (el! (cljbang--elbang-dsl foo :vc (:url \"x\")))"))))
 
-(ert-deftest cljbang-test-el-bang-unquote ()
-  "~ is the door back into cljbang: locals, vars, whole expressions."
+(ert-deftest cljbang-test-el-bang-door-back ()
+  "clj! is the door back into cljbang: locals, vars, whole expressions."
   (should (equal '(:x :x :x)
-                 (cljbang-test--eval "(let [n 3] (el! (cl-loop repeat ~n collect :x)))")))
-  (should (= 8 (cljbang-test--eval "(ns elbangcfg) (def thr 7) (el! (+ 1 ~thr))")))
+                 (cljbang-test--eval
+                  "(let [n 3] (el! (cl-loop repeat (clj! n) collect :x)))")))
+  (should (= 8 (cljbang-test--eval "(ns elbangcfg) (def thr 7) (el! (+ 1 (clj! thr)))")))
   (should (equal "3 items"
                  (cljbang-test--eval
-                  "(let [xs [1 2 3]] (el! (format \"%d items\" ~(count xs))))")))
+                  "(let [xs [1 2 3]] (el! (format \"%d items\" (clj! (count xs)))))")))
   (cljbang--set-current-ns nil))
 
 (ert-deftest cljbang-test-el-bang-shares-the-lexical-scope ()
@@ -702,14 +703,15 @@ environment, rather than expanding later without it."
 
 (ert-deftest cljbang-test-the-doors-nest-to-any-depth ()
   "Each door flips the language, and one lexical scope spans the tower."
-  ;; cljbang > el! > ~cljbang > el!, locals crossing every boundary
+  ;; cljbang > el! > clj! > el!, locals crossing every boundary
   (should (= 130 (cljbang-test--eval
-                  "(let [a 1] (el! (+ 100 ~(let [b 2] (el! (* 10 (+ ~a ~b)))))))")))
+                  "(let [a 1] (el! (+ 100 (clj! (let [b 2] (el! (* 10 (clj! (+ a b)))))))))")))
   ;; elisp > clj! > el! > clj!, the deep re-entry env-free
   (should (= 12 (let ((m 2))
                   (clj! (let [k 3] (el! (* m k (clj! (count [1 2]))))))))))
 
 (ert-deftest cljbang-test-el-bang-refuses-cljbang-literals ()
+  (should-error (cljbang-test--eval "(el! (foo ~x))"))
   (should-error (cljbang-test--eval "(el! (foo ~@xs))"))
   (should-error (cljbang-test--eval "(el! {:a 1})")))
 

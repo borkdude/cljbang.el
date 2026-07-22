@@ -8,20 +8,24 @@
               (= :token (api/tag head))
               (= 'clj! (api/sexpr head))))))
 
-(defn- unquoted
-  "The cljbang inside NODE: ~forms and (clj! ...) bodies, at any depth.
-Everything else is elisp."
+(defn- cljbang-parts
+  "The (clj! ...) bodies in NODE, at any depth.  Everything else is
+elisp, except a stray ~, which el! refuses."
   [node]
   (cond
     (contains? #{:unquote :unquote-splicing} (api/tag node))
-    (:children node)
+    (do (api/reg-finding!
+         (assoc (meta node)
+                :message "inside el! the door back is (clj! ...), not ~"
+                :type :cljbang/el-bang))
+        nil)
     (clj-bang-call? node)
     (rest (:children node))
     :else
-    (mapcat unquoted (:children node))))
+    (mapcat cljbang-parts (:children node))))
 
 (defn el-bang
-  "Lint (el! ...) as (do <its cljbang parts>)."
+  "Lint (el! ...) as (do <its clj! bodies>)."
   [{:keys [node]}]
   {:node (api/list-node
-          (list* (api/token-node 'do) (unquoted node)))})
+          (list* (api/token-node 'do) (cljbang-parts node)))})

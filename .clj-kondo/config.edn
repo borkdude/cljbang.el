@@ -4,9 +4,10 @@
 ;; about for Clojure and wrong about here, since Emacs autoloads it.
 ;;
 ;; (:require [cljbang.core :refer [el! clj!]]) resolves el! and clj! for
-;; clj-kondo.  The el! hook then lints only the ~unquoted cljbang inside,
+;; clj-kondo.  The el! hook then lints only the (clj! ...) bodies inside,
 ;; since the rest is elisp.
 {:hooks {:analyze-call {cljbang.core/el! hooks.cljbang/el-bang}}
  :lint-as {cljbang.core/clj! clojure.core/do}
- :linters {:unresolved-namespace {:exclude [el cljbang.core]}
+ :linters {:cljbang/el-bang {:level :error}
+           :unresolved-namespace {:exclude [el cljbang.core]}
            :aliased-namespace-var-usage {:level :off}}}
