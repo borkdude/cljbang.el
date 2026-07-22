@@ -105,10 +105,12 @@ Add this file-local variable to `example.clj` to enable inline evaluation with `
 
 ### Interning
 
-`defn` and `def` intern real elisp symbols, so anything a file defines is
-callable from elisp afterwards. Without an `ns` the name is used as is.
-An `ns` prefixes it, following the elisp convention: one dash for the
-public API, two for internal, which is what `defn-` gives you.
+`defn` and `def` intern real elisp symbols for functions and variables. An
+`ns` prefixes them using the elisp convention: one dash for public names
+and two for `defn-`. Code without an `ns` uses `cljbang-user`, like
+Clojure's `user`, so it cannot replace an unqualified elisp name such as
+`car`. `clj!` is the exception: it interns names as written to define
+elisp names directly.
 
 ```clojure
 ;; my_config.clj
