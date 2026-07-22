@@ -153,11 +153,8 @@ with that name. `lib.some-thing` is `lib/some_thing.clj`.
 
 ```clojure
 (ns my.config
-  ;; clj-kondo is right that :as-alias never loads, and wrong that the
-  ;; call fails, since Emacs autoloads it. Add this per file, or once in
-  ;; .clj-kondo/config.edn.
-  {:clj-kondo/config '{:linters {:aliased-namespace-var-usage {:level :off}}}}
-  (:require [lib.b :as b]          ;; loads lib/b.clj
+  (:require [cljbang.core :refer [el! clj!]]
+            [lib.b :as b]          ;; loads lib/b.clj
             [magit :as m]          ;; loads magit now, about 55ms
             [string :as s]         ;; a built-in prefix, nothing to load
             [org :as-alias o]))    ;; alias only, org loads when called
@@ -194,22 +191,42 @@ Warning (cljbang): a/b-c interns a-b-c, already a-b/c
 
 ## Interop
 
-Any name cljbang does not define compiles to a plain elisp call:
-
-```clojure
-(propertize "hi" 'face 'bold)
-(make-overlay (point) (line-end-position))
-```
-
 `el/` reaches the host environment explicitly, the way `js/` does in
-ClojureScript. Use it for names cljbang shadows, and for elisp names
-containing a slash:
+ClojureScript:
 
 ```clojure
+(el/propertize "hi" 'face 'bold)
+(el/make-overlay (el/point) (el/line-end-position))
 (el/assoc "b" '(("a" . 1) ("b" . 2)))   ; elisp assoc, not Clojure's
 el/tab-width                            ; a variable, not a function
 (set! el/my/some-var 42)                ; slash preserved
 ```
+
+A bare name cljbang does not define also compiles to a plain elisp
+call, so `(propertize ...)` works as well. clj-kondo cannot know that,
+so `el/` is the spelling the linter understands.
+
+`el!` embeds elisp itself, for the macros whose arguments are not
+expressions. `(clj! ...)` is the door back, compiled in place with the
+surrounding scope, and a backquote inside is elisp's own, with `~` and
+`~@` standing for `,` and `,@`:
+
+```clojure
+(el! (use-package magit
+       :bind (("C-x g" . magit-status))))
+
+(let [n 3]
+  (el! (cl-loop repeat (clj! n) collect :x)))
+
+(def todo-file "~/todo.org")
+(el! (setq org-capture-templates
+           `(("t" "Todo" entry (file ~(clj! todo-file)) "* TODO %?"))))
+```
+
+Reach for `el!` when an elisp macro demands it; cljbang's own forms
+cover the rest. From elisp, `clj!` is the same door the other way, as
+under Usage. There it sees no elisp locals, and unqualified names
+resolve in `cljbang-user`.
 
 ## Standard library
 
