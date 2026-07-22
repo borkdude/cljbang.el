@@ -1199,6 +1199,63 @@ cannot take it."
 
 ;;; Sequence and map functions
 
+(ert-deftest cljbang-test-cons-makes-a-list ()
+  "Elisp cons onto a vector would make a dotted pair."
+  (should (equal '(0 1 2) (cljbang-test--eval "(cons 0 [1 2])")))
+  (should (equal '(0 1 2) (cljbang-test--eval "(cons 0 (list 1 2))")))
+  (should (equal '(0) (cljbang-test--eval "(cons 0 nil)")))
+  (should (equal '(1 2 3 4) (cljbang-test--eval "(list* 1 2 [3 4])"))))
+
+(ert-deftest cljbang-test-quot-and-rem ()
+  (should (= 3 (cljbang-test--eval "(quot 7 2)")))
+  (should (= -3 (cljbang-test--eval "(quot -7 2)")))
+  (should (= 1 (cljbang-test--eval "(rem 7 2)")))
+  (should (= -1 (cljbang-test--eval "(rem -7 2)"))))
+
+(ert-deftest cljbang-test-more-seq-functions ()
+  (should (equal '(1 :x 2 :x 3) (cljbang-test--eval "(interpose :x [1 2 3])")))
+  (should (null (cljbang-test--eval "(interpose :x [])")))
+  (should (equal '(1 :a 2 :b) (cljbang-test--eval "(interleave [1 2 3] [:a :b])")))
+  (should (equal '(1 2) (cljbang-test--eval "(butlast [1 2 3])")))
+  (should (null (cljbang-test--eval "(butlast [1])")))
+  (should (equal '(1 2) (cljbang-test--eval "(keep identity [1 nil 2])")))
+  (should (equal [1 3] (cljbang-test--eval "(filterv odd? [1 2 3 4])")))
+  (should (equal '(:x :x :x) (cljbang-test--eval "(repeat 3 :x)")))
+  (should (equal '(1 3 6 10) (cljbang-test--eval "(reductions + [1 2 3 4])")))
+  (should (equal '(10 11 13 16) (cljbang-test--eval "(reductions + 10 [1 2 3])"))))
+
+(ert-deftest cljbang-test-partition ()
+  "A trailing group smaller than N is dropped, as in Clojure."
+  (should (equal '((1 2) (3 4)) (cljbang-test--eval "(partition 2 [1 2 3 4 5])")))
+  (should (equal '((1 2) (4 5)) (cljbang-test--eval "(partition 2 3 [1 2 3 4 5 6 7])"))))
+
+(ert-deftest cljbang-test-map-over-many-collections ()
+  (should (equal '(11 22 33) (cljbang-test--eval "(map + [1 2 3] [10 20 30])")))
+  (should (equal [1 :a] (nth 0 (cljbang-test--eval "(map vector [1 2] [:a :b])")))))
+
+(ert-deftest cljbang-test-grouping-functions ()
+  (should (= 2 (cljbang-test--eval "(get (frequencies [:a :a :b]) :a)")))
+  (should (equal [1 3] (cljbang-test--eval "(get (group-by odd? [1 2 3 4]) true)")))
+  ;; the even bucket keys under nil, since the host has no false
+  (should (equal [2 4] (cljbang-test--eval "(get (group-by odd? [1 2 3 4]) nil)")))
+  (should (= 1 (cljbang-test--eval "(get (zipmap [:a :b] [1 2]) :a)")))
+  (should (= 2 (cljbang-test--eval "(count (zipmap [:a :b :c] [1 2]))"))))
+
+(ert-deftest cljbang-test-boolean-predicates ()
+  (should (cljbang-test--eval "(true? true)"))
+  (should-not (cljbang-test--eval "(true? 1)"))
+  (should (cljbang-test--eval "(false? false)"))
+  (should (cljbang-test--eval "(false? nil)"))
+  (should-not (cljbang-test--eval "(boolean nil)"))
+  (should (cljbang-test--eval "(boolean 0)"))
+  (should (cljbang-test--eval "(pos-int? 3)")))
+
+(ert-deftest cljbang-test-when-not-and-if-not ()
+  (should (eq :y (cljbang-test--eval "(when-not false :y)")))
+  (should (null (cljbang-test--eval "(when-not true :y)")))
+  (should (eq :y (cljbang-test--eval "(if-not false :y :n)")))
+  (should (eq :n (cljbang-test--eval "(if-not true :y :n)"))))
+
 (ert-deftest cljbang-test-seq-functions ()
   (should (equal [1 2] (cljbang-test--eval "(into [] [1 2])")))
   (should (equal [1 2 3] (cljbang-test--eval "(into [1] (list 2 3))")))
