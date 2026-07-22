@@ -211,13 +211,6 @@ el/tab-width                            ; a variable, not a function
 (set! el/my/some-var 42)                ; slash preserved
 ```
 
-cljbang ships clj-kondo config, hooks included. Point `:config-paths` at
-it from your project's `.clj-kondo/config.edn`:
-
-```clojure
-{:config-paths ["/path/to/cljbang/clj-kondo.exports/borkdude/cljbang"]}
-```
-
 ## Standard library
 
 Cljbang has these special forms:
@@ -411,6 +404,31 @@ call after requiring `myproject`.
 
 Do not include `*.clj.*.elc` files. They are generated caches, not
 package files.
+
+## clj-kondo
+
+cljbang ships clj-kondo config, hooks included. Point `:config-paths` at
+it from your project's `.clj-kondo/config.edn`:
+
+```clojure
+{:config-paths ["/path/to/cljbang/clj-kondo.exports/borkdude/cljbang"]}
+```
+
+Require `cljbang.core` with `:refer`, so `el!` and `clj!` resolve:
+
+```clojure
+(ns my.config
+  (:require [cljbang.core :refer [el! clj!]]))
+```
+
+The require loads nothing, since cljbang implements that namespace
+itself.
+
+Inside `el!` only the `(clj! ...)` parts are linted as Clojure. The
+elisp around them is invisible, so a binding used by bare elisp alone
+reads as unused, where `(clj! n)` counts as a use. A backquote inside
+`el!` is elisp's own and is left alone, and a `~` outside one is
+reported with the compiler's message.
 
 ## Benchmarks
 
