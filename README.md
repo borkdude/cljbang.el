@@ -289,7 +289,8 @@ mapv mapcat into range take drop take-while drop-while distinct
 some every? empty? apply partial comp complement constantly
 keys vals merge dissoc select-keys update get-in assoc-in update-in
 re-pattern re-find re-matches re-seq
-hash-map hash-set throw ex-info ex-message ex-data ex-cause load-file
+hash-map hash-set throw ex-info ex-message ex-data ex-cause
+slurp spit load-file
 atom deref reset! swap!
 keyword symbol nil? some? map? set? vector? fn? symbol? keyword?
 string? number? integer? int?

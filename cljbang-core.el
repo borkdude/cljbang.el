@@ -185,6 +185,19 @@
 (defun cljbang-ex-cause (e)
   (when (cljbang--ex-info-p e) (aref e 3)))
 
+(defun cljbang-slurp (f)
+  "Contents of file F as a string."
+  (with-temp-buffer
+    (insert-file-contents f)
+    (buffer-string)))
+
+(defun cljbang-spit (f content &rest opts)
+  "Write CONTENT to file F, rendered as str renders it.
+:append true appends instead of overwriting."
+  (write-region (cljbang-str content) nil f
+                (and (plist-get opts :append) t) 'quiet)
+  nil)
+
 (defun cljbang-re-pattern (pattern)
   "A regex over PATTERN.  The syntax is elisp's, not Java's, as the host wins."
   (record 'cljbang-regex pattern))

@@ -1557,6 +1557,24 @@ registered again when the cache loads."
   (should (equal "[1 2 3 #{9}]"
                  (cljbang-test--eval "(pr-str (edn/read-string \"[1 2 3 #{9}]\"))"))))
 
+(ert-deftest cljbang-test-slurp-and-spit ()
+  (let ((f (make-temp-file "cljbang-spit")))
+    (unwind-protect
+        (progn
+          (should (null (cljbang-test--eval (format "(spit %S \"hello\")" f))))
+          (should (equal "hello" (cljbang-test--eval (format "(slurp %S)" f))))
+          (cljbang-test--eval (format "(spit %S \" world\" :append true)" f))
+          (should (equal "hello world" (cljbang-test--eval (format "(slurp %S)" f))))
+          ;; content is rendered as str renders it, as in Clojure
+          (cljbang-test--eval (format "(spit %S 42)" f))
+          (should (equal "42" (cljbang-test--eval (format "(slurp %S)" f))))
+          (cljbang-test--eval (format "(spit %S nil)" f))
+          (should (equal "" (cljbang-test--eval (format "(slurp %S)" f)))))
+      (delete-file f))))
+
+(ert-deftest cljbang-test-slurp-of-a-missing-file-throws ()
+  (should-error (cljbang-test--eval "(slurp \"/no/such/cljbang/file\")")))
+
 (ert-deftest cljbang-test-edn-read-string ()
   (should (= 1 (cljbang-test--eval "(get (edn/read-string \"{:a 1, :b 2}\") :a)")))
   (should (= 2 (cljbang-test--eval "(count (get (edn/read-string \"{:b #{2 3}}\") :b))")))

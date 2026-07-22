@@ -76,6 +76,7 @@
     (pos? . cl-plusp) (neg? . cl-minusp)
     (re-pattern . cljbang-re-pattern) (re-find . cljbang-re-find)
     (re-matches . cljbang-re-matches) (re-seq . cljbang-re-seq)
+    (slurp . cljbang-slurp) (spit . cljbang-spit)
     (load-file . cljbang-load-file)))
 
 
