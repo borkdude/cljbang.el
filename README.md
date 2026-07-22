@@ -405,9 +405,9 @@ call after requiring `myproject`.
 Do not include `*.clj.*.elc` files. They are generated caches, not
 package files.
 
-## clj-kondo
+## Clj-kondo
 
-cljbang ships clj-kondo config, hooks included. Point `:config-paths` at
+Cljbang ships a clj-kondo configuration. Point `:config-paths` at
 it from your project's `.clj-kondo/config.edn`:
 
 ```clojure

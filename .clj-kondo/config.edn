@@ -1,1 +1,1 @@
-{:config-paths ["../clj-kondo.exports/borkdude/cljbang"]}
+{:config-paths ["../resources/clj-kondo.exports/borkdude/cljbang"]}
