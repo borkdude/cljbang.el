@@ -301,6 +301,10 @@ An atom derefs with `@` as well as `deref`:
 (let [a (atom 0)] (swap! a inc) @a)   ;; => 1
 ```
 
+`clojure.edn/read-string` is available as `edn/read-string` without a
+`require`. `false` reads as nil, and `#_`, char and tagged literals are
+not supported.
+
 `clojure.string` is available as `str` without a `require`:
 
 ```

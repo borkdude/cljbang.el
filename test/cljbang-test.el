@@ -1547,6 +1547,32 @@ registered again when the cache loads."
       (delete-directory dir t)
       (cljbang--set-current-ns nil))))
 
+(ert-deftest cljbang-test-edn-read-string ()
+  (should (= 1 (cljbang-test--eval "(get (edn/read-string \"{:a 1, :b 2}\") :a)")))
+  (should (= 2 (cljbang-test--eval "(count (get (edn/read-string \"{:b #{2 3}}\") :b))")))
+  (should (equal '(1 2) (cljbang-test--eval "(edn/read-string \"(1 2)\")")))
+  (should (equal [1 2] (cljbang-test--eval "(edn/read-string \"[1, 2]\")")))
+  (should (eq 'foo/bar (cljbang-test--eval "(edn/read-string \"foo/bar\")")))
+  ;; a symbol is data, not a name to resolve
+  (should (eq 'inc (cljbang-test--eval "(edn/read-string \"inc\")")))
+  (should (equal "{:a [1 #{2}]}"
+                 (cljbang-test--eval "(pr-str (edn/read-string \"{:a [1 #{2}]}\"))"))))
+
+(ert-deftest cljbang-test-edn-reads-one-form ()
+  (should (equal [1 2] (cljbang-test--eval "(edn/read-string \"[1 2] garbage\")")))
+  (should (null (cljbang-test--eval "(edn/read-string \"\")"))))
+
+(ert-deftest cljbang-test-edn-booleans ()
+  "false reads as nil, since the host has no false."
+  (should (eq t (cljbang-test--eval "(edn/read-string \"true\")")))
+  (should (equal [t nil nil] (cljbang-test--eval "(edn/read-string \"[true false nil]\")"))))
+
+(ert-deftest cljbang-test-edn-refuses-code-syntax ()
+  (should-error (cljbang-test--eval "(edn/read-string \"@foo\")"))
+  (should-error (cljbang-test--eval "(edn/read-string \"`x\")"))
+  (should-error (cljbang-test--eval "(edn/read-string \"~x\")"))
+  (should-error (cljbang-test--eval "(edn/read-string \"#_ 1 2\")")))
+
 (ert-deftest cljbang-test-clojure-string ()
   "Checked against Clojure, including the argument orders elisp reverses."
   (should (cljbang-test--eval "(str/includes? \"hello\" \"ell\")"))

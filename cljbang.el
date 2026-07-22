@@ -98,7 +98,7 @@
   "Clojure name -> the elisp symbol a macro cljbang ships is interned as.")
 
 (defconst cljbang--ns-default-aliases
-  '((str . "clojure.string")))
+  '((str . "clojure.string") (edn . "clojure.edn")))
 
 ;; Current namespace: (ns foo) makes subsequent defn/def intern munged
 ;; names (bar -> foo-bar, or foo--bar for defn-), and references to names
@@ -1047,6 +1047,38 @@ nothing, as it does in Clojure, and so does a name cljbang never saw."
 (defun cljbang--read-forms (s)
   "Clojure source S as forms, ready for `cljbang-compile'."
   (cljbang--splice-braces (cljbang--read-all (cljbang--rewrite-dispatch s))))
+
+;; edn is what a quoted literal already is, so the code reader does the
+;; reading and the only work left is refusing what edn does not have.
+
+(defconst cljbang--not-edn
+  '((el/cljbang-deref . "@") (el/cljbang-re-pattern . "#\"")
+    (cljbang--fn-literal . "#(") (cljbang--syntax-quote . "`")
+    (cljbang--unquote . "~") (cljbang--unquote-splicing . "~@")
+    (\` . "`") (\,@ . "~@"))
+  "What the reader made of syntax that edn does not have.")
+
+(defun cljbang--edn-form (form)
+  "FORM with edn booleans as the host's, refusing what is not edn."
+  (cond ((eq form 'true) t)
+        ((eq form 'false) nil)
+        ((vectorp form)
+         (apply #'vector (mapcar #'cljbang--edn-form (append form nil))))
+        ((consp form)
+         (when-let* ((hit (assq (car form) cljbang--not-edn)))
+           (error "cljbang: %s is not edn" (cdr hit)))
+         (cons (cljbang--edn-form (car form)) (cljbang--edn-form (cdr form))))
+        ;; the elisp reader turns #_ into the empty-named symbol
+        ((and form (symbolp form) (string= "" (symbol-name form)))
+         (error "cljbang: #_ is not supported"))
+        (t form)))
+
+(defun cljbang-edn-read-string (s)
+  "Read the first edn form in S, as clojure.edn/read-string does.
+false reads as nil, since the host has no false.  Char literals, tagged
+literals and #_ are not supported."
+  (let ((form (cljbang--edn-form (car (cljbang--read-forms (concat "'" s))))))
+    (eval (cljbang-compile form) t)))
 
 (defun cljbang-eval-string (s)
   "Read Clojure source S, compile each top-level form, eval in-process."

@@ -64,7 +64,8 @@
     s))
 
 (defconst cljbang--ns-fns
-  '(("clojure.string/join" . cljbang-string-join)
+  '(("clojure.edn/read-string" . cljbang-edn-read-string)
+    ("clojure.string/join" . cljbang-string-join)
     ("clojure.string/split" . cljbang-string-split)
     ("clojure.string/replace" . cljbang-string-replace)
     ("clojure.string/replace-first" . cljbang-string-replace-first)
