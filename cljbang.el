@@ -942,14 +942,15 @@ nothing, as it does in Clojure, and so does a name cljbang never saw."
         (cond
          ;; a keyword looks itself up, and is a symbol, so test it first
          ((keywordp head) `(cljbang-get ,(car args) ,head ,@(cdr args)))
+         ;; a local binding shadows everything, as it does in Clojure
+         ((and (symbolp head) (memq head env))
+          `(cljbang--invoke ,head ,@args))
          ((and (symbolp head) (cljbang--qualified head))
           `(,(cljbang--warn-unresolved (cljbang--qualified head) head) ,@args))
          ((and (symbolp head) (cljbang--ns-resolve head))
           `(,(cljbang--ns-resolve head) ,@args))
          ((and (symbolp head) (alist-get head cljbang--core-fns))
           `(,(alist-get head cljbang--core-fns) ,@args))
-         ((and (symbolp head) (memq head env))
-          `(cljbang--invoke ,head ,@args))
          ((symbolp head) `(,head ,@args))
          (t `(cljbang--invoke ,(cljbang-compile head env) ,@args)))))))
 
@@ -1392,8 +1393,11 @@ first is cheaper than building a token list for every one."
     (nreverse (car stack))))
 
 (defmacro clj! (&rest forms)
-  "Compile Clojure FORMS to elisp at macro-expansion time."
-  `(progn ,@(mapcar #'cljbang-compile (cljbang--splice-braces forms))))
+  "Compile Clojure FORMS to elisp at macro-expansion time.
+A name is interned as it is written, not under the default namespace, so
+clj! defines the elisp names it names."
+  (let ((cljbang--default-ns nil))
+    `(progn ,@(mapcar #'cljbang-compile (cljbang--splice-braces forms)))))
 
 ;;; Loading whole files: implicit clj! around the file's contents
 

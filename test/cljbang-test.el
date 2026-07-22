@@ -10,6 +10,12 @@
   "Evaluate Clojure SRC and return the value of the last form."
   (cljbang-eval-string src))
 
+(defun cljbang-test--eval-bare (src)
+  "Evaluate SRC with names interned as written, the way clj! does.
+For tests of form structure, where the default namespace is only noise."
+  (let ((cljbang--default-ns nil))
+    (cljbang-eval-string src)))
+
 
 ;;; Map literals
 
@@ -327,51 +333,78 @@ keywords."
 
 (ert-deftest cljbang-test-docstrings ()
   "A Clojure docstring goes where elisp keeps one, so C-h f finds it."
-  (cljbang-test--eval "(defn dt-fn \"Doubles X.\" [x] (* x 2))")
-  (should (equal "Doubles X." (documentation 'dt-fn)))
-  (should (= 42 (dt-fn 21)))
-  (should (equal '(x) (help-function-arglist 'dt-fn)))
-  (cljbang-test--eval "(def dt-var \"The answer.\" 42)")
-  (should (equal "The answer." (get 'dt-var 'variable-documentation)))
-  (should (= 42 dt-var))
-  ;; and a string as the only body form is still a return value
-  (cljbang-test--eval "(defn dt-plain [x] \"just a string\")")
-  (should (equal "just a string" (dt-plain 1))))
+  (cljbang-test--eval "(ns dt)
+                       (defn doubler \"Doubles X.\" [x] (* x 2))
+                       (def answer \"The answer.\" 42)
+                       (defn plain [x] \"just a string\")")
+  (should (equal "Doubles X." (documentation 'dt-doubler)))
+  (should (= 42 (dt-doubler 21)))
+  (should (equal '(x) (help-function-arglist 'dt-doubler)))
+  (should (equal "The answer." (get 'dt-answer 'variable-documentation)))
+  (should (= 42 dt-answer))
+  ;; a string as the only body form is still a return value
+  (should (equal "just a string" (dt-plain 1)))
+  (cljbang--set-current-ns nil))
+
+(ert-deftest cljbang-test-no-ns-defaults-to-cljbang-user ()
+  "As Clojure defaults to user, so a bare name cannot clobber elisp."
+  (cljbang-test--eval "(defn nnf [] :x)")
+  (should (fboundp 'cljbang-user-nnf))
+  (should-not (fboundp 'nnf))
+  ;; the classic hazard: (defn car ...) leaves elisp car alone
+  (cljbang-test--eval "(defn car [x] :mine)")
+  (should (equal 1 (car (list 1 2))))
+  (cljbang--set-current-ns nil))
+
+(ert-deftest cljbang-test-clj-bang-interns-bare ()
+  "clj! defines the elisp names it writes, whatever the default namespace."
+  (eval (macroexpand '(clj! (defn cljbang-bare-demo [] :y))) t)
+  (should (fboundp 'cljbang-bare-demo))
+  (should (eq :y (cljbang-bare-demo)))
+  (fmakunbound 'cljbang-bare-demo))
+
+(ert-deftest cljbang-test-a-local-shadows-a-namespace-name ()
+  "A let binding wins over a var, macro or core function of that name."
+  (should (= 5 (cljbang-test--eval
+                "(defmacro sh [x] (list '+ x 100)) (let [sh (fn [n] n)] (sh 5))")))
+  (should (= 4 (cljbang-test--eval "(let [inc (fn [n] (- n 1))] (inc 5))")))
+  (cljbang--set-current-ns nil))
 
 (ert-deftest cljbang-test-callable-from-elisp ()
   "The promise: what a .clj file defines, elisp can call."
-  (cljbang-test--eval "(defn ce-plain [x] (* x 2))
-                       (defn ce-varargs [a & rest] (list a rest))
-                       (defn ce-destructured [{:keys [a]}] a)
-                       (defn ce-cmd [] (interactive) :ran)")
+  (cljbang-test--eval "(ns ce)
+                       (defn plain [x] (* x 2))
+                       (defn varargs [a & rest] (list a rest))
+                       (defn destructured [{:keys [a]}] a)
+                       (defn cmd [] (interactive) :ran)")
   (should (= 42 (ce-plain 21)))
   (should (equal '(1 (2 3)) (ce-varargs 1 2 3)))
   (should (commandp 'ce-cmd))
   (should-error (ce-plain 1 2))
   ;; a map parameter wants a cljbang map, not an alist
-  (should (= 7 (ce-destructured (cljbang-hash-map :a 7)))))
+  (should (= 7 (ce-destructured (cljbang-hash-map :a 7))))
+  (cljbang--set-current-ns nil))
 
 ;;; Syntax quote
 
 (ert-deftest cljbang-test-syntax-quote ()
-  (should (equal '(a b c) (cljbang-test--eval "`(a b c)")))
-  (should (equal '(a 1) (cljbang-test--eval "(let [x 1] `(a ~x))")))
-  (should (= 5 (cljbang-test--eval "(let [x 5] `~x)")))
-  (should (equal '(a 3) (cljbang-test--eval "`(a ~(+ 1 2))")))
-  (should (null (cljbang-test--eval "`()"))))
+  (should (equal '(a b c) (cljbang-test--eval-bare "`(a b c)")))
+  (should (equal '(a 1) (cljbang-test--eval-bare "(let [x 1] `(a ~x))")))
+  (should (= 5 (cljbang-test--eval-bare "(let [x 5] `~x)")))
+  (should (equal '(a 3) (cljbang-test--eval-bare "`(a ~(+ 1 2))")))
+  (should (null (cljbang-test--eval-bare "`()"))))
 
 (ert-deftest cljbang-test-syntax-quote-splices ()
-  (should (equal '(a 1 2 b) (cljbang-test--eval "(let [xs [1 2]] `(a ~@xs b))")))
-  (should (equal [1 2 3] (cljbang-test--eval "(let [xs [1 2]] `[~@xs 3])")))
-  (should (equal '(1 2) (cljbang-test--eval "(let [xs [1 2]] `(~@xs))")))
-  (should (equal '(a) (cljbang-test--eval "(let [xs []] `(a ~@xs))"))))
+  (should (equal '(a 1 2 b) (cljbang-test--eval-bare "(let [xs [1 2]] `(a ~@xs b))")))
+  (should (equal [1 2 3] (cljbang-test--eval-bare "(let [xs [1 2]] `[~@xs 3])")))
+  (should (equal '(1 2) (cljbang-test--eval-bare "(let [xs [1 2]] `(~@xs))")))
+  (should (equal '(a) (cljbang-test--eval-bare "(let [xs []] `(a ~@xs))"))))
 
 (ert-deftest cljbang-test-syntax-quote-over-collections ()
-  (cljbang--set-current-ns nil)
-  (should (equal [a 1] (cljbang-test--eval "(let [x 1] `[a ~x])")))
-  (should (= 1 (cljbang-test--eval "(let [x 1] (get `{:a ~x} :a))")))
-  (should (= 2 (cljbang-test--eval "(count `#{1 2})")))
-  (should (equal '(a (b (c 2))) (cljbang-test--eval "`(a (b (c ~(+ 1 1))))"))))
+  (should (equal [a 1] (cljbang-test--eval-bare "(let [x 1] `[a ~x])")))
+  (should (= 1 (cljbang-test--eval-bare "(let [x 1] (get `{:a ~x} :a))")))
+  (should (= 2 (cljbang-test--eval-bare "(count `#{1 2})")))
+  (should (equal '(a (b (c 2))) (cljbang-test--eval-bare "`(a (b (c ~(+ 1 1))))"))))
 
 (ert-deftest cljbang-test-syntax-quote-qualifies-to-the-namespace ()
   "A macro expands elsewhere, so an unqualified name settles here."
@@ -603,7 +636,7 @@ cannot take it."
   "A backtick, tilde or @ inside a string or comment is left alone."
   (should (equal "a ~b and `c and @d" (cljbang-test--eval "(str \"a ~b and `c and @d\")")))
   (should (equal "x#" (cljbang-test--eval "(str \"x#\")")))
-  (should (equal '(a "~not-unquoted" b) (cljbang-test--eval "`(a \"~not-unquoted\" b)")))
+  (should (equal '(a "~not-unquoted" b) (cljbang-test--eval-bare "`(a \"~not-unquoted\" b)")))
   (should (eq :ok (cljbang-test--eval ";; `backtick ~tilde @at x#\n:ok"))))
 
 ;;; Macros
@@ -1543,15 +1576,16 @@ cannot take it."
          (f (expand-file-name "stale.clj" dir)))
     (unwind-protect
         (progn
-          (write-region "(defn stale-one [] 1)\n" nil f nil 'quiet)
+          (write-region "(ns stale)\n(defn one [] 1)\n" nil f nil 'quiet)
           (cljbang-load-file f)
           (should (= 1 (stale-one)))
           ;; the cache must look older than the source
           (set-file-times (cljbang--cache-file f) (time-subtract (current-time) 10))
-          (write-region "(defn stale-one [] 2)\n" nil f nil 'quiet)
+          (write-region "(ns stale)\n(defn one [] 2)\n" nil f nil 'quiet)
           (cljbang-load-file f)
           (should (= 2 (stale-one))))
-      (delete-directory dir t))))
+      (delete-directory dir t)
+      (cljbang--set-current-ns nil))))
 
 (ert-deftest cljbang-test-cache-is-keyed-on-versions ()
   "Upgrading Emacs or cljbang must miss the old cache, not load it."

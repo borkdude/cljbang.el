@@ -27,9 +27,13 @@
 (defconst cljbang--no-ns :none
   "Key for the state of code outside any namespace.")
 
+(defvar cljbang--default-ns "cljbang-user"
+  "Namespace in effect when no (ns ...) has run, as user is in Clojure.
+Bound to nil inside clj!, where a name is meant as the elisp name it is.")
+
 (defun cljbang--current-ns ()
-  "Name of the namespace in effect, or nil outside one."
-  (gethash :current cljbang--ns-state))
+  "Name of the namespace in effect, the default when none was set."
+  (or (gethash :current cljbang--ns-state) cljbang--default-ns))
 
 (defun cljbang--set-current-ns (ns)
   (puthash :current ns cljbang--ns-state))
