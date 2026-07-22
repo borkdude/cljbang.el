@@ -387,6 +387,9 @@ These reader forms need source rewriting and do not work inside `clj!`:
 (clj! (hash-set 1 2))
 ```
 
+From elisp, `clj!` sees no elisp locals, and unqualified names resolve
+in `cljbang-user`.
+
 Not implemented:
 
 - `:strs`, `:syms` and namespaced `:keys` destructuring.
