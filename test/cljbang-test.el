@@ -1547,6 +1547,16 @@ registered again when the cache loads."
       (delete-directory dir t)
       (cljbang--set-current-ns nil))))
 
+(ert-deftest cljbang-test-a-literal-nested-in-quoted-data-is-built ()
+  "A set or map inside any quoted collection, under either quote spelling."
+  (should (cljbang-test--eval "(contains? (nth '[1 #{2}] 1) 2)"))
+  (should (cljbang-test--eval "(contains? (second '(1 #{2})) 2)"))
+  (should (cljbang-test--eval "(contains? (nth (quote [1 #{2}]) 1) 2)"))
+  (should (equal "(1 #{2})"
+                 (cljbang-test--eval "(pr-str (get '{:a (1 #{2})} :a))")))
+  (should (equal "[1 2 3 #{9}]"
+                 (cljbang-test--eval "(pr-str (edn/read-string \"[1 2 3 #{9}]\"))"))))
+
 (ert-deftest cljbang-test-edn-read-string ()
   (should (= 1 (cljbang-test--eval "(get (edn/read-string \"{:a 1, :b 2}\") :a)")))
   (should (= 2 (cljbang-test--eval "(count (get (edn/read-string \"{:b #{2 3}}\") :b))")))

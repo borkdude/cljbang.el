@@ -967,7 +967,12 @@ nothing, as it does in Clojure, and so does a name cljbang never saw."
        ;; as ~~x is under a single quote
        (error "cljbang: %s has no matching syntax quote"
               (if (eq (car form) 'cljbang--unquote) "~" "~@")))
-      ('quote form)
+      ('quote
+       ;; a literal inside quoted data still has to be built, whichever
+       ;; spelling of quote it hid behind
+       (if (cljbang--holds-literal-p (cadr form))
+           (cljbang-compile (cljbang--quote-literal (cadr form)) env)
+         form))
       ('comment nil)
       ('require
        ;; specs are quoted, as in Clojure
@@ -1274,6 +1279,15 @@ source text, so it applies to files and inline evaluation but not to
     (cljbang--lex-braces (symbol-name form)))
    (t (list form))))
 
+(defun cljbang--holds-literal-p (form)
+  "Whether FORM holds a map or set literal anywhere."
+  (cond ((consp form)
+         (or (memq (car form) '(cljbang--map-literal cljbang--set-literal))
+             (cljbang--holds-literal-p (car form))
+             (cljbang--holds-literal-p (cdr form))))
+        ((vectorp form)
+         (cl-some #'cljbang--holds-literal-p (append form nil)))))
+
 (defun cljbang--quote-literal (form)
   "Quote FORM as Clojure quotes a literal collection, element by element."
   (cond ((and (consp form)
@@ -1281,6 +1295,13 @@ source text, so it applies to files and inline evaluation but not to
          (cons (car form) (mapcar #'cljbang--quote-literal (cdr form))))
         ((vectorp form)
          (apply #'vector (mapcar #'cljbang--quote-literal (append form nil))))
+        ;; a list is rebuilt only when a literal hides in it, so an
+        ;; ordinary quoted list stays the shared structure it was
+        ((and (consp form) (cljbang--holds-literal-p form))
+         (if (proper-list-p form)
+             (cons 'list (mapcar #'cljbang--quote-literal form))
+           (list 'cons (cljbang--quote-literal (car form))
+                 (cljbang--quote-literal (cdr form)))))
         (t (list 'quote form))))
 
 (defun cljbang--needs-splice-p (form)
@@ -1335,7 +1356,7 @@ first is cheaper than building a token list for every one."
        ;; to the brace that follows
        ((eq tok cljbang--set-marker) (push tok (car stack)))
        (t (let ((v (cljbang--splice-form tok)))
-            (push (if pending (progn (setq pending nil) (list 'quote v)) v)
+            (push (if pending (progn (setq pending nil) (cljbang--quote-literal v)) v)
                   (car stack))))))
     (when (cdr stack) (error "cljbang: unbalanced { in Clojure form"))
     (nreverse (car stack))))
