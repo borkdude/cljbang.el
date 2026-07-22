@@ -309,7 +309,7 @@ names a namespace without loading it as in Clojure."
                    (not (string-suffix-p "/" name)))
           (let ((parts (split-string name "/")))
             (unless (= (length parts) 2)
-              (error "cljbang: %s has more than one /; use el/%s for an elisp name"
+              (error "cljbang: %s has more than one /; use (el! %s) for an elisp name"
                      name name))
             (pcase-let* ((`(,ns ,n) parts)
                          (full (or (cdr (assq (intern ns) (cljbang--ns-aliases)))

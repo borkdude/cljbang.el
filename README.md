@@ -198,7 +198,14 @@ Use `el/` to access Emacs Lisp names explicitly:
 (el/make-overlay (el/point) (el/line-end-position))
 (el/assoc "b" '(("a" . 1) ("b" . 2)))   ; elisp assoc, not Clojure's
 el/tab-width                            ; a variable, not a function
-(set! el/my/some-var 42)                ; slash preserved
+```
+
+An elisp name with a slash of its own, `my/some-var`, is not a legal
+Clojure symbol behind `el/`. Use `el!`:
+
+```clojure
+(el! (setq my/some-var 42))
+(el! my/some-var)
 ```
 
 Unknown bare calls also fall through to Emacs Lisp. Use `el/` to avoid
