@@ -13,6 +13,10 @@
 elisp, except a stray ~, which el! refuses."
   [node]
   (cond
+    ;; a backquote inside el! is elisp's own, restored by the compiler,
+    ;; so its contents are opaque here
+    (= :syntax-quote (api/tag node))
+    nil
     (contains? #{:unquote :unquote-splicing} (api/tag node))
     (do (api/reg-finding!
          (assoc (meta node)

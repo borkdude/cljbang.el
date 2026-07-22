@@ -710,6 +710,37 @@ environment, rather than expanding later without it."
   (should (= 12 (let ((m 2))
                   (clj! (let [k 3] (el! (* m k (clj! (count [1 2]))))))))))
 
+(ert-deftest cljbang-test-el-bang-restores-elisp-backquote ()
+  "Inside el! a backquote is elisp's own, with ~ and ~@ as , and ,@.
+The org-capture-templates idiom, verbatim."
+  (should (equal '(("t" entry (file "/tmp/t.org")))
+                 (cljbang-test--eval
+                  "(ns bqt) (def f \"/tmp/t.org\")
+                   (el! `((\"t\" entry (file ~(clj! f)))))")))
+  (should (equal '(1 :a :b 2)
+                 (cljbang-test--eval
+                  "(ns bqs) (def extra [:a :b]) (el! `(1 ~@(clj! extra) 2))")))
+  (cljbang--set-current-ns nil))
+
+(ert-deftest cljbang-test-el-bang-nested-backquote-matches-elisp ()
+  "Depth counts, as elisp's own backquote counts it."
+  (should (equal (eval '(let ((x 5)) (car `(`(a ,,x)))) t)
+                 (cljbang-test--eval "(el! (let ((x 5)) (car `(`(a ~~x)))))"))))
+
+(ert-deftest cljbang-test-a-macro-can-emit-el-bang ()
+  "A template carries an el! body verbatim, since its names are elisp."
+  (should (equal "v=42"
+                 (cljbang-test--eval
+                  "(ns mel) (defmacro m [x] `(el! (format \"v=%s\" (clj! ~x)))) (m 42)")))
+  (cljbang--set-current-ns nil))
+
+(ert-deftest cljbang-test-a-macro-can-emit-el-slash ()
+  "The el/ spelling in a template stays qualified, one name at a time."
+  (should (equal "v=42"
+                 (cljbang-test--eval
+                  "(ns mes) (defmacro m [x] `(el/format \"v=%s\" ~x)) (m 42)")))
+  (cljbang--set-current-ns nil))
+
 (ert-deftest cljbang-test-el-bang-refuses-cljbang-literals ()
   (should-error (cljbang-test--eval "(el! (foo ~x))"))
   (should-error (cljbang-test--eval "(el! (foo ~@xs))"))

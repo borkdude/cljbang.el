@@ -641,6 +641,12 @@ stay as they are."
            (t (list 'quote (cljbang--template-symbol form)))))
     ((pred vectorp)
      (list 'vec (cljbang--template-seq (append form nil) gensyms)))
+    ;; an el! region in a template is elisp: its names are not vars, so
+    ;; they are carried verbatim rather than qualified
+    (`(el! . ,body)
+     (cons 'list (cons ''el!
+                       (mapcar (lambda (f) (cljbang--template-verbatim f gensyms))
+                               body))))
     (`(cljbang--fn-literal . ,_)
      (error "cljbang: #() inside a syntax quote does not work, use (fn [x#] ...)"))
     (`(cljbang--map-literal . ,kvs)
@@ -648,6 +654,22 @@ stay as they are."
     (`(cljbang--set-literal . ,xs)
      (list 'apply 'hash-set (cljbang--template-seq xs gensyms)))
     ((pred consp) (cljbang--template-seq form gensyms))
+    (_ form)))
+
+(defun cljbang--template-verbatim (form gensyms)
+  "Build FORM as the elisp it is, honouring only unquote.
+For el! bodies inside a template, where qualification has no business."
+  (pcase form
+    (`(cljbang--unquote ,x) x)
+    ((pred vectorp)
+     (list 'vec (cons 'list (mapcar (lambda (f) (cljbang--template-verbatim f gensyms))
+                                    (append form nil)))))
+    ((pred consp)
+     (cons 'list (mapcar (lambda (f) (cljbang--template-verbatim f gensyms)) form)))
+    ((pred symbolp)
+     (if (string-suffix-p "#" (symbol-name form))
+         (list 'quote (cljbang--auto-gensym form gensyms))
+       (list 'quote form)))
     (_ form)))
 
 (defun cljbang--template-seq (forms gensyms)
@@ -668,6 +690,30 @@ stay as they are."
           ((and (null (cdr parts)) (not spliced)) (car parts))
           (t (cons 'concat parts)))))
 
+(defun cljbang--el-quasi (form env &optional depth)
+  "FORM inside a restored elisp backquote, nested DEPTH levels deep.
+~ becomes elisp unquote, and at depth one its expression is template
+territory again, as , hands elisp back to evaluation."
+  (let ((depth (or depth 1)))
+    (pcase form
+      (`(cljbang--unquote ,x)
+       (list '\, (if (= depth 1)
+                    (cljbang--el-template x env)
+                  (cljbang--el-quasi x env (1- depth)))))
+      (`(cljbang--unquote-splicing ,x)
+       (list '\,@ (if (= depth 1)
+                     (cljbang--el-template x env)
+                   (cljbang--el-quasi x env (1- depth)))))
+      (`(cljbang--syntax-quote ,x)
+       (list '\` (cljbang--el-quasi x env (1+ depth))))
+      ((pred vectorp)
+       (apply #'vector (mapcar (lambda (f) (cljbang--el-quasi f env depth))
+                               (append form nil))))
+      ((pred consp)
+       (cons (cljbang--el-quasi (car form) env depth)
+             (cljbang--el-quasi (cdr form) env depth)))
+      (_ form))))
+
 (defun cljbang--el-template (form env)
   "FORM as the elisp it already is, with (clj! ...) back into cljbang.
 The mirror image of clj!: everything is host code taken verbatim, and
@@ -675,6 +721,10 @@ the other door, compiled here and now with the environment, is the one
 way back."
   (pcase form
     (`(clj! . ,body) (cljbang-compile (cons 'do body) env))
+    ;; elisp's own backquote, which the reader took, handed back: inside
+    ;; it ~ and ~@ are elisp's , and ,@ as they pair with ` in Clojure
+    (`(cljbang--syntax-quote ,x)
+     (list '\` (cljbang--el-quasi x env)))
     ((or `(cljbang--unquote ,_) `(cljbang--unquote-splicing ,_))
      (error "cljbang: inside el! the door back is (clj! ...), not ~"))
     ((or `(cljbang--map-literal . ,_) `(cljbang--set-literal . ,_))
