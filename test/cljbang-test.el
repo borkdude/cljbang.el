@@ -680,6 +680,15 @@ lexical scope: elisp, cljbang inside clj!, elisp again inside el!."
   (let ((m 2))
     (should (= 6 (clj! (let [k 3] (el! (* m k))))))))
 
+(ert-deftest cljbang-test-the-doors-nest-to-any-depth ()
+  "Each door flips the language, and one lexical scope spans the tower."
+  ;; cljbang > el! > ~cljbang > el!, locals crossing every boundary
+  (should (= 130 (cljbang-test--eval
+                  "(let [a 1] (el! (+ 100 ~(let [b 2] (el! (* 10 (+ ~a ~b)))))))")))
+  ;; elisp > clj! > el! > clj!, the deep re-entry env-free
+  (should (= 12 (let ((m 2))
+                  (clj! (let [k 3] (el! (* m k (clj! (count [1 2]))))))))))
+
 (ert-deftest cljbang-test-el-bang-refuses-cljbang-literals ()
   (should-error (cljbang-test--eval "(el! (foo ~@xs))"))
   (should-error (cljbang-test--eval "(el! {:a 1})")))
