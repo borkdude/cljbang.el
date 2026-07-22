@@ -6,3 +6,6 @@ my_test_file.clj
 
 # compiled .clj caches
 *.clj.*.elc
+
+# emacs lock files
+.#*
