@@ -639,6 +639,113 @@ cannot take it."
   (should (equal '(a "~not-unquoted" b) (cljbang-test--eval-bare "`(a \"~not-unquoted\" b)")))
   (should (eq :ok (cljbang-test--eval ";; `backtick ~tilde @at x#\n:ok"))))
 
+;;; el!
+
+(ert-deftest cljbang-test-el-bang-is-raw-elisp ()
+  "The body is host code taken verbatim, so DSL macros work."
+  (should (equal '(1 2 3) (cljbang-test--eval "(el! (cl-loop for i from 1 to 3 collect i))")))
+  (should (equal '(2 3) (cljbang-test--eval "(el! (mapcar #'1+ (list 1 2)))")))
+  (should (= 10 (cljbang-test--eval
+                 "(el! (setq cljbang--elbang-t1 1) (+ cljbang--elbang-t1 9))"))))
+
+(ert-deftest cljbang-test-el-bang-keyword-dsl ()
+  "A use-package-shaped macro gets its keywords and symbols untouched."
+  (should (equal '(foo :vc (:url "x"))
+                 (cljbang-test--eval
+                  "(el! (defmacro cljbang--elbang-dsl (name &rest props)
+                          (list 'quote (cons name props))))
+                   (el! (cljbang--elbang-dsl foo :vc (:url \"x\")))"))))
+
+(ert-deftest cljbang-test-el-bang-door-back ()
+  "clj! is the door back into cljbang: locals, vars, whole expressions."
+  (should (equal '(:x :x :x)
+                 (cljbang-test--eval
+                  "(let [n 3] (el! (cl-loop repeat (clj! n) collect :x)))")))
+  (should (= 8 (cljbang-test--eval "(ns elbangcfg) (def thr 7) (el! (+ 1 (clj! thr)))")))
+  (should (equal "3 items"
+                 (cljbang-test--eval
+                  "(let [xs [1 2 3]] (el! (format \"%d items\" (clj! (count xs)))))")))
+  (cljbang--set-current-ns nil))
+
+(ert-deftest cljbang-test-el-bang-shares-the-lexical-scope ()
+  "A cljbang local is an elisp local of the same name, so bare works too."
+  (should (equal '(:x :x :x)
+                 (cljbang-test--eval "(let [n 3] (el! (cl-loop repeat n collect :x)))"))))
+
+(ert-deftest cljbang-test-el-bang-composes-inside-clj-bang ()
+  "el! is clj!'s escape hatch too, since every layer splices into one
+lexical scope: elisp, cljbang inside clj!, elisp again inside el!."
+  (let ((n 3))
+    (should (equal '(:x :x :x) (clj! (repeat (el! n) :x)))))
+  ;; the tower: an elisp local and a cljbang local meet inside el!
+  (let ((m 2))
+    (should (= 6 (clj! (let [k 3] (el! (* m k))))))))
+
+(ert-deftest cljbang-test-clj-bang-is-a-door-where-the-compiler-sees-it ()
+  "Inside el!, and in plain cljbang, clj! compiles in place with the
+environment, rather than expanding later without it."
+  ;; a local crosses el! and comes back through clj!
+  (should (= 2 (cljbang-test--eval
+                "(let [xs [1 2 3]] (el! (car (clj! (rest xs)))))")))
+  ;; a namespace var resolves at compile time, not at call time
+  (should (= 2 (progn
+                 (cljbang-test--eval
+                  "(ns doorns) (def items [1 2 3])
+                   (defn f [] (el! (car (clj! (rest items)))))")
+                 (cljbang--set-current-ns nil)
+                 (doorns-f))))
+  ;; in plain cljbang, clj! is do
+  (should (= 3 (cljbang-test--eval "(count (clj! [1 2 3]))"))))
+
+(ert-deftest cljbang-test-clj-bang-rooted-tower-carries-the-env ()
+  "The deep clj! sees the cljbang local, though no reader ran."
+  (should (= 106 (clj! (let [k 3] (el! (+ 100 (clj! (* k 2)))))))))
+
+(ert-deftest cljbang-test-the-doors-nest-to-any-depth ()
+  "Each door flips the language, and one lexical scope spans the tower."
+  ;; cljbang > el! > clj! > el!, locals crossing every boundary
+  (should (= 130 (cljbang-test--eval
+                  "(let [a 1] (el! (+ 100 (clj! (let [b 2] (el! (* 10 (clj! (+ a b)))))))))")))
+  ;; elisp > clj! > el! > clj!, the deep re-entry env-free
+  (should (= 12 (let ((m 2))
+                  (clj! (let [k 3] (el! (* m k (clj! (count [1 2]))))))))))
+
+(ert-deftest cljbang-test-el-bang-restores-elisp-backquote ()
+  "Inside el! a backquote is elisp's own, with ~ and ~@ as , and ,@.
+The org-capture-templates idiom, verbatim."
+  (should (equal '(("t" entry (file "/tmp/t.org")))
+                 (cljbang-test--eval
+                  "(ns bqt) (def f \"/tmp/t.org\")
+                   (el! `((\"t\" entry (file ~(clj! f)))))")))
+  (should (equal '(1 :a :b 2)
+                 (cljbang-test--eval
+                  "(ns bqs) (def extra [:a :b]) (el! `(1 ~@(clj! extra) 2))")))
+  (cljbang--set-current-ns nil))
+
+(ert-deftest cljbang-test-el-bang-nested-backquote-matches-elisp ()
+  "Depth counts, as elisp's own backquote counts it."
+  (should (equal (eval '(let ((x 5)) (car `(`(a ,,x)))) t)
+                 (cljbang-test--eval "(el! (let ((x 5)) (car `(`(a ~~x)))))"))))
+
+(ert-deftest cljbang-test-a-macro-can-emit-el-bang ()
+  "A template carries an el! body verbatim, since its names are elisp."
+  (should (equal "v=42"
+                 (cljbang-test--eval
+                  "(ns mel) (defmacro m [x] `(el! (format \"v=%s\" (clj! ~x)))) (m 42)")))
+  (cljbang--set-current-ns nil))
+
+(ert-deftest cljbang-test-a-macro-can-emit-el-slash ()
+  "The el/ spelling in a template stays qualified, one name at a time."
+  (should (equal "v=42"
+                 (cljbang-test--eval
+                  "(ns mes) (defmacro m [x] `(el/format \"v=%s\" ~x)) (m 42)")))
+  (cljbang--set-current-ns nil))
+
+(ert-deftest cljbang-test-el-bang-refuses-cljbang-literals ()
+  (should-error (cljbang-test--eval "(el! (foo ~x))"))
+  (should-error (cljbang-test--eval "(el! (foo ~@xs))"))
+  (should-error (cljbang-test--eval "(el! {:a 1})")))
+
 ;;; Macros
 
 (ert-deftest cljbang-test-macro-form ()

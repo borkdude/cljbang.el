@@ -1,6 +1,1 @@
-;; el/ is cljbang's host environment, the way js/ is in ClojureScript:
-;; el/emacs-version means the elisp function emacs-version.  And a package
-;; reached through :as-alias is never loaded, which clj-kondo is right
-;; about for Clojure and wrong about here, since Emacs autoloads it.
-{:linters {:unresolved-namespace {:exclude [el]}
-           :aliased-namespace-var-usage {:level :off}}}
+{:config-paths ["../resources/clj-kondo.exports/borkdude/cljbang"]}

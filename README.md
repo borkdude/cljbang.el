@@ -153,11 +153,8 @@ with that name. `lib.some-thing` is `lib/some_thing.clj`.
 
 ```clojure
 (ns my.config
-  ;; clj-kondo is right that :as-alias never loads, and wrong that the
-  ;; call fails, since Emacs autoloads it. Add this per file, or once in
-  ;; .clj-kondo/config.edn.
-  {:clj-kondo/config '{:linters {:aliased-namespace-var-usage {:level :off}}}}
-  (:require [lib.b :as b]          ;; loads lib/b.clj
+  (:require [cljbang.core :refer [el! clj!]]
+            [lib.b :as b]          ;; loads lib/b.clj
             [magit :as m]          ;; loads magit now, about 55ms
             [string :as s]         ;; a built-in prefix, nothing to load
             [org :as-alias o]))    ;; alias only, org loads when called
@@ -194,30 +191,37 @@ Warning (cljbang): a/b-c interns a-b-c, already a-b/c
 
 ## Interop
 
-Any name cljbang does not define compiles to a plain elisp call:
+Use `el/` to access Emacs Lisp names explicitly:
 
 ```clojure
-(propertize "hi" 'face 'bold)
-(make-overlay (point) (line-end-position))
-```
-
-`el/` reaches the host environment explicitly, the way `js/` does in
-ClojureScript. Use it for names cljbang shadows, and for elisp names
-containing a slash:
-
-```clojure
+(el/propertize "hi" 'face 'bold)
+(el/make-overlay (el/point) (el/line-end-position))
 (el/assoc "b" '(("a" . 1) ("b" . 2)))   ; elisp assoc, not Clojure's
 el/tab-width                            ; a variable, not a function
 (set! el/my/some-var 42)                ; slash preserved
 ```
 
-clj-kondo reports `el` as an unresolved namespace and warns when vars are
-called through `:as-alias`. Disable those warnings in
-`.clj-kondo/config.edn`:
+Unknown bare calls also fall through to Emacs Lisp. Use `el/` to avoid
+unresolved-symbol warnings from clj-kondo.
+
+Use `el!` for Emacs Lisp macros. A nested `clj!` compiles a cljbang
+expression in the surrounding scope:
 
 ```clojure
-{:linters {:unresolved-namespace {:exclude [el]}
-           :aliased-namespace-var-usage {:level :off}}}
+(el! (use-package magit
+       :bind (("C-x g" . magit-status))))
+
+(let [n 3]
+  (el! (cl-loop repeat (clj! n) collect :x)))
+```
+
+Inside `el!`, backquote has Emacs Lisp semantics. Write `~` and `~@`
+where Emacs Lisp uses `,` and `,@`:
+
+```clojure
+(def todo-file "~/todo.org")
+(el! (setq org-capture-templates
+           `(("t" "Todo" entry (file ~(clj! todo-file)) "* TODO %?"))))
 ```
 
 ## Standard library
@@ -383,6 +387,9 @@ These reader forms need source rewriting and do not work inside `clj!`:
 (clj! (hash-set 1 2))
 ```
 
+From elisp, `clj!` sees no elisp locals, and unqualified names resolve
+in `cljbang-user`.
+
 Not implemented:
 
 - `:strs`, `:syms` and namespaced `:keys` destructuring.
@@ -413,6 +420,37 @@ call after requiring `myproject`.
 
 Do not include `*.clj.*.elc` files. They are generated caches, not
 package files.
+
+## Clj-kondo
+
+Cljbang includes a clj-kondo configuration. Add cljbang to `deps.edn`,
+then import its configuration:
+
+```clojure
+{:deps {io.github.borkdude/cljbang.el {:git/tag "..." :git/sha "..."}}}
+```
+
+```shell
+mkdir -p .clj-kondo
+clj-kondo --lint "$(clojure -Spath)" --copy-configs --skip-lint
+```
+
+Alternatively, point `.clj-kondo/config.edn` at a checkout:
+
+```clojure
+{:config-paths
+ ["/path/to/cljbang/resources/clj-kondo.exports/borkdude/cljbang"]}
+```
+
+For clj-kondo, refer `el!` and `clj!` from `cljbang.core`:
+
+```clojure
+(ns my.config
+  (:require [cljbang.core :refer [el! clj!]]))
+```
+
+Within `el!`, clj-kondo analyzes only nested `clj!` forms. Emacs Lisp
+references do not count as uses of cljbang bindings.
 
 ## Benchmarks
 

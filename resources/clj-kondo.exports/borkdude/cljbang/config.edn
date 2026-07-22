@@ -1,0 +1,14 @@
+;; clj-kondo config for cljbang code.  Point :config-paths here from your
+;; project's .clj-kondo/config.edn, and require cljbang.core with :refer
+;; so el! and clj! resolve:
+;;
+;;   (:require [cljbang.core :refer [el! clj!]])
+;;
+;; el/ is cljbang's host environment, the way js/ is in ClojureScript,
+;; and a package reached through :as-alias is autoloaded by Emacs, which
+;; clj-kondo cannot know.
+{:hooks {:analyze-call {cljbang.core/el! hooks.cljbang/el-bang
+                        cljbang.core/clj! hooks.cljbang/clj-bang}}
+ :linters {:cljbang/el-bang {:level :error}
+           :unresolved-namespace {:exclude [el cljbang.core]}
+           :aliased-namespace-var-usage {:level :off}}}
