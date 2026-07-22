@@ -434,7 +434,7 @@ Cljbang includes a clj-kondo configuration. Add cljbang to `deps.edn`,
 then import its configuration:
 
 ```clojure
-{:deps {io.github.borkdude/cljbang.el {:git/tag "..." :git/sha "..."}}}
+{:deps {io.github.borkdude/cljbang.el {:git/tag "v0.0.9" :git/sha "b0b117656a1b05922e819327c35bf01a31323ccd"}}}
 ```
 
 ```shell
