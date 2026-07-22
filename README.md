@@ -51,20 +51,12 @@ Requires Emacs 28.1 or later.
 ```
 
 From a clone, add the directory to `load-path` and require `cljbang-mode`
-for inline evaluation. It loads the compiler and runtime:
+for inline evaluation:
 
 ```emacs-lisp
 (add-to-list 'load-path "~/dev/cljbang.el")
 (require 'cljbang-mode)
-
-;; then load your own Clojure
-(cljbang-load-file "~/.emacs.d/config.clj")
 ```
-
-Without the editor integration, `(require 'cljbang)` is enough to compile
-and load. To run code that was byte-compiled earlier, `(require
-'cljbang-core)` is enough, plus `(require 'cljbang-string)` when it uses
-`clojure.string`.
 
 ## Usage
 
@@ -80,24 +72,24 @@ You can use the `clj!` macro directly inside an elisp buffer:
 
 This defines `winner` in the running Emacs.
 
-For regular use, put the source code in a `.clj` file and load it with:
+For regular use, load a `.clj` file:
 
 ```emacs-lisp
-(cljbang-load-file "example.clj")
+(cljbang-load-file "~/.emacs.d/config.clj")
 ```
 
-or:
+Or require a namespace:
 
 ```emacs-lisp
 (cljbang-require 'example)
 ```
 
-The result is cached beside the file as `example.clj.30-0.0.1.elc` and
-reused until you edit the source, so this costs about what loading the
-equivalent elisp would. The name carries the Emacs and cljbang versions,
-so upgrading either rebuilds. Ignore `*.clj.*.elc` in version control.
+Loaded files are cached beside the source and reused until it changes. The
+cache name carries the Emacs and cljbang versions, so upgrading either
+rebuilds it. Ignore `*.clj.*.elc` in version control.
 
-Add this file-local variable to `example.clj` to enable inline evaluation with `C-x C-e`:
+Add this file-local variable to a `.clj` file to enable inline evaluation
+with `C-x C-e`:
 
 ```clojure
 ;; -*- mode: clojure; cljbang-whole-buffer: t -*-
