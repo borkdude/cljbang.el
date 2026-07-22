@@ -322,7 +322,7 @@ names a namespace without loading it as in Clojure."
 ;; cljbang itself.
 (defconst cljbang--special-forms
   '("def" "defn" "defn-" "defmacro" "fn" "let" "loop" "recur" "set!" "if" "do"
-    "try" "ns" "require" "quote" "comment")
+    "try" "ns" "require" "quote" "comment" "el!")
   "Names `cljbang-compile' handles itself.")
 
 (defvar cljbang--recur-target nil
@@ -662,6 +662,24 @@ stay as they are."
           ;; was spliced may be a vector and the result is a list
           ((and (null (cdr parts)) (not spliced)) (car parts))
           (t (cons 'concat parts)))))
+
+(defun cljbang--el-template (form env)
+  "FORM as the elisp it already is, with ~ compiled as cljbang.
+The mirror image of a syntax quote: everything is host code taken
+verbatim, and an unquote is the door back into cljbang."
+  (pcase form
+    (`(cljbang--unquote ,x) (cljbang-compile x env))
+    (`(cljbang--unquote-splicing ,_)
+     (error "cljbang: ~@ has no meaning inside el!"))
+    ((or `(cljbang--map-literal . ,_) `(cljbang--set-literal . ,_))
+     (error "cljbang: {} and #{} are cljbang literals, not elisp; build one with ~"))
+    ((pred vectorp)
+     (apply #'vector (mapcar (lambda (f) (cljbang--el-template f env))
+                             (append form nil))))
+    ((pred consp)
+     (cons (cljbang--el-template (car form) env)
+           (cljbang--el-template (cdr form) env)))
+    (_ form)))
 
 (defun cljbang--compile-syntax-quote (form env)
   (cljbang-compile (cljbang--template form (make-hash-table :test #'equal)) env))
@@ -1003,6 +1021,9 @@ nothing, as it does in Clojure, and so does a name cljbang never saw."
            (cljbang-compile (cljbang--quote-literal (cadr form)) env)
          form))
       ('comment nil)
+      ('el!
+       `(progn ,@(mapcar (lambda (f) (cljbang--el-template f env))
+                         (cdr form))))
       ('require
        ;; specs are quoted, as in Clojure
        (let* ((specs (mapcar (lambda (arg)

@@ -639,6 +639,51 @@ cannot take it."
   (should (equal '(a "~not-unquoted" b) (cljbang-test--eval-bare "`(a \"~not-unquoted\" b)")))
   (should (eq :ok (cljbang-test--eval ";; `backtick ~tilde @at x#\n:ok"))))
 
+;;; el!
+
+(ert-deftest cljbang-test-el-bang-is-raw-elisp ()
+  "The body is host code taken verbatim, so DSL macros work."
+  (should (equal '(1 2 3) (cljbang-test--eval "(el! (cl-loop for i from 1 to 3 collect i))")))
+  (should (equal '(2 3) (cljbang-test--eval "(el! (mapcar #'1+ (list 1 2)))")))
+  (should (= 10 (cljbang-test--eval
+                 "(el! (setq cljbang--elbang-t1 1) (+ cljbang--elbang-t1 9))"))))
+
+(ert-deftest cljbang-test-el-bang-keyword-dsl ()
+  "A use-package-shaped macro gets its keywords and symbols untouched."
+  (should (equal '(foo :vc (:url "x"))
+                 (cljbang-test--eval
+                  "(el! (defmacro cljbang--elbang-dsl (name &rest props)
+                          (list 'quote (cons name props))))
+                   (el! (cljbang--elbang-dsl foo :vc (:url \"x\")))"))))
+
+(ert-deftest cljbang-test-el-bang-unquote ()
+  "~ is the door back into cljbang: locals, vars, whole expressions."
+  (should (equal '(:x :x :x)
+                 (cljbang-test--eval "(let [n 3] (el! (cl-loop repeat ~n collect :x)))")))
+  (should (= 8 (cljbang-test--eval "(ns elbangcfg) (def thr 7) (el! (+ 1 ~thr))")))
+  (should (equal "3 items"
+                 (cljbang-test--eval
+                  "(let [xs [1 2 3]] (el! (format \"%d items\" ~(count xs))))")))
+  (cljbang--set-current-ns nil))
+
+(ert-deftest cljbang-test-el-bang-shares-the-lexical-scope ()
+  "A cljbang local is an elisp local of the same name, so bare works too."
+  (should (equal '(:x :x :x)
+                 (cljbang-test--eval "(let [n 3] (el! (cl-loop repeat n collect :x)))"))))
+
+(ert-deftest cljbang-test-el-bang-composes-inside-clj-bang ()
+  "el! is clj!'s escape hatch too, since every layer splices into one
+lexical scope: elisp, cljbang inside clj!, elisp again inside el!."
+  (let ((n 3))
+    (should (equal '(:x :x :x) (clj! (repeat (el! n) :x)))))
+  ;; the tower: an elisp local and a cljbang local meet inside el!
+  (let ((m 2))
+    (should (= 6 (clj! (let [k 3] (el! (* m k))))))))
+
+(ert-deftest cljbang-test-el-bang-refuses-cljbang-literals ()
+  (should-error (cljbang-test--eval "(el! (foo ~@xs))"))
+  (should-error (cljbang-test--eval "(el! {:a 1})")))
+
 ;;; Macros
 
 (ert-deftest cljbang-test-macro-form ()
