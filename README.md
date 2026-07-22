@@ -407,12 +407,21 @@ package files.
 
 ## Clj-kondo
 
-Cljbang ships a clj-kondo configuration. Point `:config-paths` at
-it from your project's `.clj-kondo/config.edn`:
+Cljbang ships a clj-kondo configuration. Add the repo to a `deps.edn`
+and import it:
 
 ```clojure
-{:config-paths ["/path/to/cljbang/clj-kondo.exports/borkdude/cljbang"]}
+{:deps {io.github.borkdude/cljbang.el {:git/tag "..." :git/sha "..."}}}
 ```
+
+```
+mkdir -p .clj-kondo
+clj-kondo --lint "$(clojure -Spath)" --copy-configs --skip-lint
+```
+
+Without a JVM, `:config-paths` in `.clj-kondo/config.edn` pointing at a
+checkout works too:
+`["/path/to/cljbang/resources/clj-kondo.exports/borkdude/cljbang"]`.
 
 Require `cljbang.core` with `:refer`, so `el!` and `clj!` resolve:
 
