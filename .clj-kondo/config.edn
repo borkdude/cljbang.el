@@ -1,13 +1,1 @@
-;; el/ is cljbang's host environment, the way js/ is in ClojureScript:
-;; el/emacs-version means the elisp function emacs-version.  And a package
-;; reached through :as-alias is never loaded, which clj-kondo is right
-;; about for Clojure and wrong about here, since Emacs autoloads it.
-;;
-;; (:require [cljbang.core :refer [el! clj!]]) resolves el! and clj! for
-;; clj-kondo.  The el! hook then lints only the (clj! ...) bodies inside,
-;; since the rest is elisp.
-{:hooks {:analyze-call {cljbang.core/el! hooks.cljbang/el-bang
-                        cljbang.core/clj! hooks.cljbang/clj-bang}}
- :linters {:cljbang/el-bang {:level :error}
-           :unresolved-namespace {:exclude [el cljbang.core]}
-           :aliased-namespace-var-usage {:level :off}}}
+{:config-paths ["../clj-kondo.exports/borkdude/cljbang"]}

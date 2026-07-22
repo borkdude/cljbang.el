@@ -211,13 +211,11 @@ el/tab-width                            ; a variable, not a function
 (set! el/my/some-var 42)                ; slash preserved
 ```
 
-clj-kondo reports `el` as an unresolved namespace and warns when vars are
-called through `:as-alias`. Disable those warnings in
-`.clj-kondo/config.edn`:
+cljbang ships clj-kondo config, hooks included. Point `:config-paths` at
+it from your project's `.clj-kondo/config.edn`:
 
 ```clojure
-{:linters {:unresolved-namespace {:exclude [el]}
-           :aliased-namespace-var-usage {:level :off}}}
+{:config-paths ["/path/to/cljbang/clj-kondo.exports/borkdude/cljbang"]}
 ```
 
 ## Standard library
