@@ -680,6 +680,26 @@ lexical scope: elisp, cljbang inside clj!, elisp again inside el!."
   (let ((m 2))
     (should (= 6 (clj! (let [k 3] (el! (* m k))))))))
 
+(ert-deftest cljbang-test-clj-bang-is-a-door-where-the-compiler-sees-it ()
+  "Inside el!, and in plain cljbang, clj! compiles in place with the
+environment, rather than expanding later without it."
+  ;; a local crosses el! and comes back through clj!
+  (should (= 2 (cljbang-test--eval
+                "(let [xs [1 2 3]] (el! (car (clj! (rest xs)))))")))
+  ;; a namespace var resolves at compile time, not at call time
+  (should (= 2 (progn
+                 (cljbang-test--eval
+                  "(ns doorns) (def items [1 2 3])
+                   (defn f [] (el! (car (clj! (rest items)))))")
+                 (cljbang--set-current-ns nil)
+                 (doorns-f))))
+  ;; in plain cljbang, clj! is do
+  (should (= 3 (cljbang-test--eval "(count (clj! [1 2 3]))"))))
+
+(ert-deftest cljbang-test-clj-bang-rooted-tower-carries-the-env ()
+  "The deep clj! sees the cljbang local, though no reader ran."
+  (should (= 106 (clj! (let [k 3] (el! (+ 100 (clj! (* k 2)))))))))
+
 (ert-deftest cljbang-test-the-doors-nest-to-any-depth ()
   "Each door flips the language, and one lexical scope spans the tower."
   ;; cljbang > el! > ~cljbang > el!, locals crossing every boundary

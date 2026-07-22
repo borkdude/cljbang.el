@@ -327,7 +327,7 @@ names a namespace without loading it as in Clojure."
 ;; cljbang itself.
 (defconst cljbang--special-forms
   '("def" "defn" "defn-" "defmacro" "fn" "let" "loop" "recur" "set!" "if" "do"
-    "try" "ns" "require" "quote" "comment" "el!")
+    "try" "ns" "require" "quote" "comment" "el!" "clj!")
   "Names `cljbang-compile' handles itself.")
 
 (defvar cljbang--recur-target nil
@@ -674,6 +674,9 @@ The mirror image of a syntax quote: everything is host code taken
 verbatim, and an unquote is the door back into cljbang."
   (pcase form
     (`(cljbang--unquote ,x) (cljbang-compile x env))
+    ;; the other door works from this side too, compiled here and now,
+    ;; with the environment, rather than expanded by elisp later without
+    (`(clj! . ,body) (cljbang-compile (cons 'do body) env))
     (`(cljbang--unquote-splicing ,_)
      (error "cljbang: ~@ has no meaning inside el!"))
     ((or `(cljbang--map-literal . ,_) `(cljbang--set-literal . ,_))
@@ -1029,6 +1032,8 @@ nothing, as it does in Clojure, and so does a name cljbang never saw."
       ('el!
        `(progn ,@(mapcar (lambda (f) (cljbang--el-template f env))
                          (cdr form))))
+      ;; already inside cljbang, so the door is open: clj! is do
+      ('clj! `(progn ,@(cljbang--compile-body (cdr form) env)))
       ('require
        ;; specs are quoted, as in Clojure
        (let* ((specs (mapcar (lambda (arg)
