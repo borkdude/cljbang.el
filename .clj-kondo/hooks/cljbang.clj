@@ -19,13 +19,24 @@ elisp, except a stray ~, which el! refuses."
                 :message "inside el! the door back is (clj! ...), not ~"
                 :type :cljbang/el-bang))
         nil)
+    ;; kept whole: lint-as do lints the body, and clj! counts as used
     (clj-bang-call? node)
-    (rest (:children node))
+    [node]
     :else
     (mapcat cljbang-parts (:children node))))
 
-(defn el-bang
-  "Lint (el! ...) as (do <its clj! bodies>)."
+(defn clj-bang
+  "Lint (clj! ...) as its body, with no do to call redundant."
   [{:keys [node]}]
-  {:node (api/list-node
-          (list* (api/token-node 'do) (cljbang-parts node)))})
+  (let [body (rest (:children node))]
+    {:node (if (= 1 (count body))
+             (first body)
+             (api/list-node (list* (api/token-node 'do) body)))}))
+
+(defn el-bang
+  "Lint (el! ...) as its clj! parts."
+  [{:keys [node]}]
+  (let [parts (cljbang-parts node)]
+    {:node (if (= 1 (count parts))
+             (first parts)
+             (api/list-node (list* (api/token-node 'do) parts)))}))
