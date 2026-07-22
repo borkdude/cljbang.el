@@ -6,8 +6,7 @@ A Clojure-like language that runs as Emacs Lisp.
 > works for me.
 
 Cljbang (`clj!`) compiles Clojure forms to Emacs Lisp forms and evaluates them in the
-running Emacs. There is no subprocess, no transpiled text, and no runtime
-beyond `cljbang-core.el` itself.
+running Emacs. There is no subprocess and no transpiled text.
 
 Cljbang follows the same approach as [Squint](https://squint-cljs.github.io/squint/):
 
@@ -63,8 +62,9 @@ for inline evaluation. It loads the compiler and runtime:
 ```
 
 Without the editor integration, `(require 'cljbang)` is enough to compile
-and load, and `(require 'cljbang-core)` alone is enough to run code that
-was byte-compiled earlier.
+and load. To run code that was byte-compiled earlier, `(require
+'cljbang-core)` is enough, plus `(require 'cljbang-string)` when it uses
+`clojure.string`.
 
 ## Usage
 
