@@ -325,9 +325,8 @@ which `clj!` can carry too:
       (m/status))
 ```
 
-Cljbang supports map and set literals, `#_` to discard the next form,
-and nested sequential and associative destructuring in `let` bindings
-and function parameters. Sets, maps,
+Cljbang supports map and set literals and nested sequential and associative
+destructuring in `let` bindings and function parameters. Sets, maps,
 keywords and vectors can be called as functions.
 
 ```clojure
