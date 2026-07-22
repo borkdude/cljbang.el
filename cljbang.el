@@ -1080,8 +1080,8 @@ nothing, as it does in Clojure, and so does a name cljbang never saw."
 
 (defun cljbang-edn-read-string (s)
   "Read the first edn form in S, as clojure.edn/read-string does.
-false reads as nil, since the host has no false.  Char literals, tagged
-literals and #_ are not supported."
+false reads as nil, since the host has no false.  Char and tagged
+literals are not supported."
   (let ((form (cljbang--edn-form (car (cljbang--read-forms (concat "'" s))))))
     (eval (cljbang-compile form) t)))
 
@@ -1202,6 +1202,24 @@ alone, since the reader has to take that one away."
           (goto-char end)))))
   edits)
 
+(defun cljbang--discard-forms ()
+  "Delete each #_ and the form after it, the discard it is in Clojure.
+Scanned backwards, so #_#_ discards two forms, innermost first."
+  (goto-char (point-max))
+  (while (search-backward "#_" nil t)
+    (let ((beg (point)))
+      (when (and (cljbang--code-position-p beg)
+                 ;; opening a token, or stacked on another discard
+                 (or (bobp)
+                     (memq (char-before beg)
+                           '(?\s ?\t ?\n ?\( ?\[ ?{ ?\) ?\] ?} ?` ?\' ?~ ?@ ?,))
+                     (and (>= beg 3)
+                          (string= "#_" (buffer-substring (- beg 2) beg)))))
+        (goto-char (+ beg 2))
+        (when-let* ((end (ignore-errors (save-excursion (forward-sexp) (point)))))
+          (delete-region beg end)))
+      (goto-char beg))))
+
 (defun cljbang--rewrite-dispatch (s)
   "Rewrite the reader macros in S to forms the elisp reader accepts.
 Occurrences inside a string or a comment are left alone.  Needs the
@@ -1220,6 +1238,7 @@ source text, so it applies to files and inline evaluation but not to
       (modify-syntax-entry ?} "){" table)
       (set-syntax-table table))
     (cljbang--escape-auto-gensyms)
+    (cljbang--discard-forms)
     (let (edits)
       (pcase-dolist (`(,find . ,replace) cljbang--dispatch-rewrites)
         (goto-char (point-min))

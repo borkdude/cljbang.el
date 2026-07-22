@@ -302,8 +302,8 @@ An atom derefs with `@` as well as `deref`:
 ```
 
 `clojure.edn/read-string` is available as `edn/read-string` without a
-`require`. `false` reads as nil, and `#_`, char and tagged literals are
-not supported.
+`require`. `false` reads as nil, and char and tagged literals are not
+supported.
 
 `clojure.string` is available as `str` without a `require`:
 
@@ -325,8 +325,9 @@ which `clj!` can carry too:
       (m/status))
 ```
 
-Cljbang supports map and set literals and nested sequential and associative
-destructuring in `let` bindings and function parameters. Sets, maps,
+Cljbang supports map and set literals, `#_` to discard the next form,
+and nested sequential and associative destructuring in `let` bindings
+and function parameters. Sets, maps,
 keywords and vectors can be called as functions.
 
 ```clojure
@@ -380,7 +381,7 @@ Lisp semantics:
 ```
 
 These reader forms need source rewriting and do not work inside `clj!`:
-`#{}`, `#()`, `#""`, `` ` ``, `~`, `~@` and `@`. Use `hash-set`, `fn`,
+`#{}`, `#()`, `#""`, `#_`, `` ` ``, `~`, `~@` and `@`. Use `hash-set`, `fn`,
 `re-pattern`, `list` and `deref`, or move the code to a `.clj` file:
 
 ```clojure

@@ -1580,8 +1580,21 @@ registered again when the cache loads."
 (ert-deftest cljbang-test-edn-refuses-code-syntax ()
   (should-error (cljbang-test--eval "(edn/read-string \"@foo\")"))
   (should-error (cljbang-test--eval "(edn/read-string \"`x\")"))
-  (should-error (cljbang-test--eval "(edn/read-string \"~x\")"))
-  (should-error (cljbang-test--eval "(edn/read-string \"#_ 1 2\")")))
+  (should-error (cljbang-test--eval "(edn/read-string \"~x\")")))
+
+(ert-deftest cljbang-test-discard ()
+  (should (= 4 (cljbang-test--eval "(+ 1 #_2 3)")))
+  (should (equal [1 3] (cljbang-test--eval "[1 #_2 3]")))
+  (should (= 3 (cljbang-test--eval "#_#_ 1 2 3")))
+  (should (= 1 (cljbang-test--eval "(count {:a 1 #_#_:b 2})")))
+  (should (eq :after (cljbang-test--eval "#_ #{1} :after")))
+  ;; a discarded form need not read, as in Clojure
+  (should (= 3 (cljbang-test--eval "(+ 1 #_(broken ~nonsense) 2)")))
+  (should (equal "a #_ b" (cljbang-test--eval "(str \"a #_ b\")"))))
+
+(ert-deftest cljbang-test-edn-discard ()
+  (should (= 2 (cljbang-test--eval "(edn/read-string \"#_ 1 2\")")))
+  (should (equal [1 3] (cljbang-test--eval "(edn/read-string \"[1 #_2 3]\")"))))
 
 (ert-deftest cljbang-test-clojure-string ()
   "Checked against Clojure, including the argument orders elisp reverses."
