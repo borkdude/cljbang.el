@@ -97,8 +97,18 @@
   "F as something funcall can take, wrapping a set, map or keyword."
   (if (functionp f) f (lambda (&rest args) (apply #'cljbang--invoke f args))))
 
-(defun cljbang-map (f coll)
-  (mapcar (cljbang--fn f) (seq-into coll 'list)))
+(defun cljbang-map (f &rest colls)
+  "Map F over COLLS.  With more than one, F takes one item from each,
+stopping at the shortest, as in Clojure."
+  (let ((g (cljbang--fn f)))
+    (if (null (cdr colls))
+        (mapcar g (seq-into (car colls) 'list))
+      (let ((lists (mapcar (lambda (c) (seq-into c 'list)) colls))
+            acc)
+        (while (not (memq nil lists))
+          (push (apply g (mapcar #'car lists)) acc)
+          (setq lists (mapcar #'cdr lists)))
+        (nreverse acc)))))
 
 (defun cljbang-filter (pred coll)
   (seq-filter (cljbang--fn pred) (seq-into coll 'list)))
@@ -267,6 +277,95 @@
 (defun cljbang-mapv (f coll)
   (seq-into (cljbang-map f coll) 'vector))
 
+(defun cljbang-cons (x coll)
+  "Prepend X to COLL as a list.  Elisp's cons would make a dotted pair."
+  (cons x (and coll (cljbang--list coll))))
+
+(defun cljbang-list* (&rest args)
+  "Prepend the leading ARGS to the last, a collection, as one list."
+  (let ((lead (butlast args))
+        (tail (car (last args))))
+    (append lead (cljbang--list tail))))
+
+(defun cljbang-filterv (pred coll)
+  (seq-into (cljbang-filter pred coll) 'vector))
+
+(defun cljbang-keep (f coll)
+  "The non-nil results of F over COLL."
+  (let ((g (cljbang--fn f)) acc)
+    (dolist (x (cljbang--list coll) (nreverse acc))
+      (let ((v (funcall g x)))
+        (when v (push v acc))))))
+
+(defun cljbang-interpose (sep coll)
+  "The elements of COLL with SEP between each."
+  (let ((xs (cljbang--list coll)) acc)
+    (while xs
+      (push (pop xs) acc)
+      (when xs (push sep acc)))
+    (nreverse acc)))
+
+(defun cljbang-interleave (&rest colls)
+  "One element from each of COLLS in turn, stopping at the shortest."
+  (let ((lists (mapcar #'cljbang--list colls)) acc)
+    (while (not (memq nil lists))
+      (dolist (l lists) (push (car l) acc))
+      (setq lists (mapcar #'cdr lists)))
+    (nreverse acc)))
+
+(defun cljbang-butlast (coll)
+  "All but the last element of COLL, or nil when it has fewer than two."
+  (butlast (cljbang--list coll)))
+
+(defun cljbang-reductions (f init &optional coll)
+  "The running results of reducing COLL with F, INIT first when given."
+  (unless coll (setq coll init init 'cljbang--none))
+  (let* ((g (cljbang--fn f))
+         (xs (cljbang--list coll))
+         (acc (if (eq init 'cljbang--none) (pop xs) init))
+         (out (list acc)))
+    (dolist (x xs (nreverse out))
+      (setq acc (funcall g acc x))
+      (push acc out))))
+
+(defun cljbang-partition (n &rest args)
+  "Partitions of COLL of size N, stepping by STEP when given.
+A trailing group smaller than N is dropped, as in Clojure."
+  (let* ((step (if (cdr args) (car args) n))
+         (coll (cljbang--list (car (last args))))
+         acc)
+    (while (>= (length coll) n)
+      (push (seq-take coll n) acc)
+      (setq coll (nthcdr step coll)))
+    (nreverse acc)))
+
+(defun cljbang-frequencies (coll)
+  "A map of each distinct element of COLL to how often it occurs."
+  (let ((h (make-hash-table :test #'equal)))
+    (dolist (x (cljbang--list coll) h)
+      (puthash x (1+ (gethash x h 0)) h))))
+
+(defun cljbang-group-by (f coll)
+  "A map of (F x) to the vector of elements of COLL giving it."
+  (let ((h (make-hash-table :test #'equal))
+        (g (cljbang--fn f)))
+    (dolist (x (cljbang--list coll) h)
+      (let ((k (funcall g x)))
+        (puthash k (vconcat (gethash k h []) (vector x)) h)))))
+
+(defun cljbang-zipmap (ks vs)
+  "A map pairing KS with VS, stopping at the shorter."
+  (let ((h (make-hash-table :test #'equal))
+        (ks (cljbang--list ks))
+        (vs (cljbang--list vs)))
+    (while (and ks vs) (puthash (pop ks) (pop vs) h))
+    h))
+
+(defun cljbang-repeat (n x)
+  "A list of X repeated N times.  Only the bounded arity, since the host
+has no lazy sequence."
+  (make-list (max n 0) x))
+
 (defun cljbang-mapcat (f coll)
   (apply #'cljbang-concat (cljbang-map f coll)))
 
@@ -410,6 +509,12 @@
 (defun cljbang-symbol (x) (intern (cljbang-name x)))
 (defun cljbang-nil? (x) (null x))
 (defun cljbang-some? (x) (not (null x)))
+(defun cljbang-quot (a b) (truncate a b))
+(defun cljbang-rem (a b) (- a (* b (truncate a b))))
+(defun cljbang-true? (x) (eq x t))
+(defun cljbang-false? (x) (null x))
+(defun cljbang-boolean (x) (and x t))
+(defun cljbang-pos-int? (x) (and (integerp x) (> x 0)))
 (defun cljbang-map? (x) (hash-table-p x))
 (defun cljbang-set? (x) (cljbang--set-p x))
 (defun cljbang-fn? (x) (functionp x))

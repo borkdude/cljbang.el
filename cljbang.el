@@ -54,6 +54,15 @@
     (seq . cljbang-seq) (vec . cljbang-vec) (set . cljbang-set)
     (mapv . cljbang-mapv)
     (mapcat . cljbang-mapcat) (into . cljbang-into) (range . cljbang-range)
+    (cons . cljbang-cons) (list* . cljbang-list*) (filterv . cljbang-filterv)
+    (keep . cljbang-keep) (interpose . cljbang-interpose)
+    (interleave . cljbang-interleave) (butlast . cljbang-butlast)
+    (reductions . cljbang-reductions) (partition . cljbang-partition)
+    (frequencies . cljbang-frequencies) (group-by . cljbang-group-by)
+    (zipmap . cljbang-zipmap) (repeat . cljbang-repeat)
+    (quot . cljbang-quot) (rem . cljbang-rem)
+    (true? . cljbang-true?) (false? . cljbang-false?)
+    (boolean . cljbang-boolean) (pos-int? . cljbang-pos-int?)
     (take . cljbang-take) (drop . cljbang-drop)
     (take-while . cljbang-take-while) (drop-while . cljbang-drop-while)
     (distinct . cljbang-distinct) (some . cljbang-some)
@@ -89,7 +98,8 @@
 ;; (magit/status) calls elisp `magit-status'.
 
 (defconst cljbang--core-macros
-  '((when . cljbang-core-when) (cond . cljbang-core-cond)
+  '((when . cljbang-core-when) (when-not . cljbang-core-when-not)
+    (if-not . cljbang-core-if-not) (cond . cljbang-core-cond)
     (case . cljbang-core-case) (if-let . cljbang-core-if-let)
     (when-let . cljbang-core-when-let) (doseq . cljbang-core-doseq)
     (dotimes . cljbang-core-dotimes) (-> . cljbang-core->)
@@ -1520,6 +1530,14 @@ happens once unless RELOAD is non-nil."
 (cljbang--register-macro
  'cljbang-core-when
  (lambda (test &rest body) (list 'if test (cons 'do body))))
+
+(cljbang--register-macro
+ 'cljbang-core-when-not
+ (lambda (test &rest body) (list 'if test nil (cons 'do body))))
+
+(cljbang--register-macro
+ 'cljbang-core-if-not
+ (lambda (test then &optional else) (list 'if test else then)))
 
 (cljbang--register-macro
  'cljbang-core-cond
