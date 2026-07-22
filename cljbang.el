@@ -111,6 +111,12 @@
 (defconst cljbang--ns-default-aliases
   '((str . "clojure.string") (edn . "clojure.edn")))
 
+(defconst cljbang--own-namespaces
+  '("clojure.string" "clojure.edn" "cljbang.core")
+  "Namespaces cljbang implements itself, so a require has nothing to load.
+cljbang.core holds el! and clj!, and requiring it with :refer is how
+clj-kondo is told what they are.")
+
 ;; Current namespace: (ns foo) makes subsequent defn/def intern munged
 ;; names (bar -> foo-bar, or foo--bar for defn-), and references to names
 ;; defined in the current ns resolve to those munged symbols.  The
@@ -211,8 +217,7 @@ string- and buffer- are legitimate aliases with nothing to load."
 An alias for a prefix that names no feature is allowed when something is
 actually defined under it, so a typo is still an error."
   (unless (or (gethash ns cljbang--loaded-ns)
-              ;; namespaces cljbang implements itself
-              (rassoc ns cljbang--ns-default-aliases))
+              (member ns cljbang--own-namespaces))
     ;; marked before loading, so a cycle terminates
     (puthash ns t cljbang--loaded-ns)
     (let ((file (cljbang--find-ns-file ns)))
