@@ -291,7 +291,7 @@ Supported functions:
 first second rest last nth count get contains? conj assoc seq vec set
 map filter remove reduce concat sort sort-by str pr-str println prn name subs
 mapv mapcat into range take drop take-while drop-while distinct
-some every? empty? apply partial comp complement constantly
+some every? empty? apply partial comp juxt complement constantly
 keys vals merge dissoc select-keys update get-in assoc-in update-in
 re-pattern re-find re-matches re-seq
 hash-map hash-set throw ex-info ex-message ex-data ex-cause
