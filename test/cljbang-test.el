@@ -1515,6 +1515,14 @@ The org-capture-templates idiom, verbatim."
   (should (null (cljbang-test--eval "((complement odd?) 1)")))
   (should (eq :k (cljbang-test--eval "((constantly :k) 9)"))))
 
+(ert-deftest cljbang-test-juxt ()
+  (should (equal [6 4] (cljbang-test--eval "((juxt inc dec) 5)")))
+  (should (equal [5 6] (cljbang-test--eval "((juxt + *) 2 3)")))
+  (should (equal [1 2] (cljbang-test--eval "((juxt :a :b) {:a 1 :b 2})")))
+  (should (equal '([1 3] [2 4])
+                 (cljbang-test--eval "(map (juxt dec inc) [2 3])")))
+  (should-error (cljbang-test--eval "((juxt))")))
+
 (ert-deftest cljbang-test-predicates ()
   (should (cljbang-test--eval "(map? {})"))
   (should (cljbang-test--eval "(vector? [1])"))

@@ -489,6 +489,12 @@ has no lazy sequence."
           (dolist (f (cdr fs) v)
             (setq v (cljbang--invoke f v))))))))
 
+(defun cljbang-juxt (&rest fs)
+  (unless fs (error "cljbang: juxt needs at least one function"))
+  (lambda (&rest args)
+    (apply #'vector
+           (mapcar (lambda (f) (apply #'cljbang--invoke f args)) fs))))
+
 (defun cljbang-complement (f)
   (lambda (&rest args) (not (apply #'cljbang--invoke f args))))
 

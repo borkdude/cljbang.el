@@ -73,6 +73,7 @@
     (update . cljbang-update) (get-in . cljbang-get-in)
     (assoc-in . cljbang-assoc-in) (update-in . cljbang-update-in)
     (partial . cljbang-partial) (comp . cljbang-comp)
+    (juxt . cljbang-juxt)
     (complement . cljbang-complement) (constantly . cljbang-constantly)
     (atom . cljbang-atom) (deref . cljbang-deref)
     (reset! . cljbang-reset!) (swap! . cljbang-swap!)
