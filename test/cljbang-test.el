@@ -1861,7 +1861,10 @@ registered again when the cache loads."
   (should (equal "  a" (cljbang-test--eval "(str/trimr \"  a  \")")))
   (should (equal "a" (cljbang-test--eval "(str/trim-newline \"a\\n\")")))
   (should (equal ["a" "b"] (cljbang-test--eval "(str/split-lines \"a\\nb\")")))
-  (should (equal "cba" (cljbang-test--eval "(str/reverse \"abc\")"))))
+  (should (equal "cba" (cljbang-test--eval "(str/reverse \"abc\")")))
+  (should (equal "" (cljbang-test--eval "(str/join \"ab\" '())")))
+  (should (equal "" (cljbang-test--eval "(str/join \"ab\" nil)")))
+  (should (equal "" (cljbang-test--eval "(str/join nil)"))))
 
 ;;; Namespaces
 

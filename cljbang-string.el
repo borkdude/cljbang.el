@@ -11,9 +11,9 @@
 (require 'seq)
 (require 'cljbang-core)
 
-(defun cljbang-string-join (sep-or-coll &optional coll)
-  (let ((sep (if coll sep-or-coll ""))
-        (xs (seq-into (or coll sep-or-coll) 'list)))
+(defun cljbang-string-join (&rest args)
+  (let ((sep (if (cdr args) (car args) ""))
+        (xs (seq-into (car (last args)) 'list)))
     (mapconcat #'cljbang-str xs sep)))
 
 (defun cljbang-string-split (s re)
