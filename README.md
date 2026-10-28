@@ -278,7 +278,7 @@ like any other name. Write `(fn [x#] ...)`. Building an expansion with
 These ship as macros rather than compiler support:
 
 ```
-when cond case if-let when-let doseq dotimes -> ->> some-> some->>
+when cond case if-let when-let doseq for dotimes -> ->> some-> some->>
 with-out-str time
 ```
 
@@ -375,6 +375,7 @@ Lisp semantics:
 
 #"\(a\|b\)"         ;; the host engine's syntax, as Clojure's #"(a|b)" is Java's
 (assoc m :k 1)      ;; copies the map, so O(n)
+(first (for [x xs] (f x)))  ;; calls f on every x, since for is eager
 
 (try (f) (catch :default e e))         ;; catches anything like CLJS
 (try (f) (catch el/file-missing e e))  ;; or a host error symbol, like js/Error
@@ -400,7 +401,6 @@ in `cljbang-user`.
 Not implemented:
 
 - `:strs`, `:syms` and namespaced `:keys` destructuring.
-- The `:while` modifier in `doseq`.
 - Protocols and multimethods.
 
 ## Shipping a package

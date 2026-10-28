@@ -103,7 +103,7 @@
     (if-not . cljbang-core-if-not) (cond . cljbang-core-cond)
     (case . cljbang-core-case) (if-let . cljbang-core-if-let)
     (when-let . cljbang-core-when-let) (doseq . cljbang-core-doseq)
-    (dotimes . cljbang-core-dotimes) (-> . cljbang-core->)
+    (for . cljbang-core-for) (dotimes . cljbang-core-dotimes) (-> . cljbang-core->)
     (->> . cljbang-core->>) (some-> . cljbang-core-some->)
     (some->> . cljbang-core-some->>) (with-out-str . cljbang-core-with-out-str)
     (time . cljbang-core-time))
@@ -1676,9 +1676,12 @@ happens once unless RELOAD is non-nil."
 
 ;; seq-do rather than dolist, since the binding is a cljbang pattern and
 ;; fn already destructures it.  Each clause wraps the ones after it, so
-;; later pairs nest and a :let or :when scopes over the rest, as in Clojure.
-(defun cljbang--doseq-clauses (clauses body)
-  "Body forms for the doseq CLAUSES that remain, wrapping BODY."
+;; later pairs nest and a modifier scopes over the rest, as in Clojure.
+;; A :while throws to a catch around the loop of the pair before it.
+(defun cljbang--seq-clauses (macro clauses body tag)
+  "Body forms for the MACRO CLAUSES that remain, wrapping BODY.
+TAG holds the catch tag of the innermost pair's loop, or nil if it has
+no :while."
   (if (zerop (length clauses))
       body
     (let ((head (aref clauses 0))
@@ -1686,26 +1689,60 @@ happens once unless RELOAD is non-nil."
           (more (substring clauses 2)))
       (cond
        ((eq head :let)
-        (list (cons 'let (cons form (cljbang--doseq-clauses more body)))))
+        (list (cons 'let (cons form (cljbang--seq-clauses macro more body tag)))))
        ((eq head :when)
-        (list (cons 'when (cons form (cljbang--doseq-clauses more body)))))
+        (list (cons 'when (cons form (cljbang--seq-clauses macro more body tag)))))
+       ((eq head :while)
+        (list (list 'if form
+                    (cons 'do (cljbang--seq-clauses macro more body tag))
+                    (list 'el/throw tag nil))))
        ((keywordp head)
-        (error "cljbang: doseq does not support %s" head))
+        (error "cljbang: %s does not support %s" macro head))
        (t
-        (list (list 'do
-                    (list 'el/seq-do
-                          (cons 'fn (cons (vector head)
-                                          (cljbang--doseq-clauses more body)))
-                          form)
-                    nil)))))))
+        (let* ((tag (and (cljbang--seq-while-p more)
+                         (gensym "cljbang-while-")))
+               (loop (list 'el/seq-do
+                           (cons 'fn (cons (vector head)
+                                           (cljbang--seq-clauses
+                                            macro more body tag)))
+                           form)))
+          (list (if tag
+                    (list 'let (vector tag '(el/make-symbol "while"))
+                          (list 'el/catch tag loop)
+                          nil)
+                  (list 'do loop nil)))))))))
 
-(defun cljbang--doseq (bindings body)
-  "Expansion of doseq over BINDINGS, pairs and modifiers, and BODY."
+(defun cljbang--seq-while-p (clauses)
+  "Returns true if the modifiers that open CLAUSES include :while."
+  (let ((i 0) found)
+    (while (and (< i (length clauses)) (keywordp (aref clauses i)))
+      (when (eq (aref clauses i) :while) (setq found t))
+      (setq i (+ i 2)))
+    found))
+
+(defun cljbang--check-seq-bindings (macro bindings)
+  "Signals an error unless BINDINGS of MACRO open with a binding pair."
   (unless (and (vectorp bindings) (> (length bindings) 0)
                (cl-evenp (length bindings))
                (not (keywordp (aref bindings 0))))
-    (error "cljbang: doseq needs a binding pair first"))
-  (car (cljbang--doseq-clauses bindings body)))
+    (error "cljbang: %s needs a binding pair first" macro)))
+
+(defun cljbang--doseq (bindings body)
+  "Expansion of doseq over BINDINGS, pairs and modifiers, and BODY."
+  (cljbang--check-seq-bindings 'doseq bindings)
+  (car (cljbang--seq-clauses 'doseq bindings body nil)))
+
+(defun cljbang--for (bindings body)
+  "Expansion of for over BINDINGS, pairs and modifiers, and BODY.
+The expansion returns a list of BODY's values."
+  (cljbang--check-seq-bindings 'for bindings)
+  (let ((acc (gensym "cljbang-acc-")))
+    (list 'let (vector acc nil)
+          (car (cljbang--seq-clauses
+                'for bindings
+                (list (list 'set! acc (list 'el/cons body acc)))
+                nil))
+          (list 'el/nreverse acc))))
 
 (defun cljbang--dotimes (binding body)
   "Expansion of dotimes over BINDING, a name and a count, and BODY."
@@ -1722,6 +1759,10 @@ happens once unless RELOAD is non-nil."
 (cljbang--register-macro
  'cljbang-core-doseq
  (lambda (bindings &rest body) (cljbang--doseq bindings body)))
+
+(cljbang--register-macro
+ 'cljbang-core-for
+ (lambda (bindings body) (cljbang--for bindings body)))
 
 (cljbang--register-macro
  'cljbang-core-dotimes
