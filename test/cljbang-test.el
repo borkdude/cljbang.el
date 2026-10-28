@@ -978,13 +978,16 @@ The org-capture-templates idiom, verbatim."
                  (cljbang-test--eval
                   "(with-out-str (doseq [x [1 2] :when (odd? x) y [:a :b]] (println x y)))"))))
 
-(ert-deftest cljbang-test-doseq-while ()
+(ert-deftest cljbang-test-doseq-while-stops-the-loop-before-it ()
   (should (equal "1\n2\n"
                  (cljbang-test--eval
                   "(with-out-str (doseq [x [1 2 3 1] :while (< x 3)] (println x)))")))
   (should (equal "1 1\n2 1\n2 2\n"
                  (cljbang-test--eval
-                  "(with-out-str (doseq [x [1 2] y [1 2 3] :while (<= y x)] (println x y)))"))))
+                  "(with-out-str (doseq [x [1 2] y [1 2 3] :while (<= y x)] (println x y)))")))
+  (should (equal "1 :a\n2 :a\n"
+                 (cljbang-test--eval
+                  "(with-out-str (doseq [x [1 2 3] :while (< x 3) y [:a]] (println x y)))"))))
 
 (ert-deftest cljbang-test-doseq-rejects-malformed-bindings ()
   (should-error (cljbang-test--eval "(doseq [x [1] :by 2] x)"))
@@ -1003,7 +1006,7 @@ The org-capture-templates idiom, verbatim."
   (should (equal '(6)
                  (cljbang-test--eval "(for [[a b] [[1 2]] {:keys [c]} [{:c 3}]] (+ a b c))"))))
 
-(ert-deftest cljbang-test-for-let-and-when ()
+(ert-deftest cljbang-test-for-applies-let-and-when ()
   (should (equal '(10 30)
                  (cljbang-test--eval
                   "(for [x [1 2 3] :let [y (* x 10)] :when (odd? x)] y)"))))
@@ -1020,6 +1023,10 @@ The org-capture-templates idiom, verbatim."
   (should-error (cljbang-test--eval "(for [x [1] :by 2] x)"))
   (should-error (cljbang-test--eval "(for [:when true x [1]] x)"))
   (should-error (cljbang-test--eval "(for [x] x)")))
+
+(ert-deftest cljbang-test-for-takes-one-body-form ()
+  (should-error (cljbang-test--eval "(for [x [1]])"))
+  (should-error (cljbang-test--eval "(for [x [1]] x x)")))
 
 (ert-deftest cljbang-test-dotimes ()
   (should (equal "0\n1\n2\n"

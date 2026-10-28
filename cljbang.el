@@ -1677,11 +1677,10 @@ happens once unless RELOAD is non-nil."
 ;; seq-do rather than dolist, since the binding is a cljbang pattern and
 ;; fn already destructures it.  Each clause wraps the ones after it, so
 ;; later pairs nest and a modifier scopes over the rest, as in Clojure.
-;; A :while throws to a catch around the loop of the pair before it.
 (defun cljbang--seq-clauses (macro clauses body tag)
-  "Body forms for the MACRO CLAUSES that remain, wrapping BODY.
-TAG holds the catch tag of the innermost pair's loop, or nil if it has
-no :while."
+  "Returns the body forms for the MACRO CLAUSES that remain, wrapping BODY.
+TAG is the catch tag of the innermost pair's loop, or nil if no :while
+follows the pair."
   (if (zerop (length clauses))
       body
     (let ((head (aref clauses 0))
@@ -1733,14 +1732,16 @@ no :while."
   (car (cljbang--seq-clauses 'doseq bindings body nil)))
 
 (defun cljbang--for (bindings body)
-  "Expansion of for over BINDINGS, pairs and modifiers, and BODY.
+  "Returns the expansion of for over BINDINGS, pairs and modifiers, and BODY.
 The expansion returns a list of BODY's values."
   (cljbang--check-seq-bindings 'for bindings)
+  (unless (= 1 (length body))
+    (error "cljbang: for needs exactly one body form"))
   (let ((acc (gensym "cljbang-acc-")))
     (list 'let (vector acc nil)
           (car (cljbang--seq-clauses
                 'for bindings
-                (list (list 'set! acc (list 'el/cons body acc)))
+                (list (list 'set! acc (list 'el/cons (car body) acc)))
                 nil))
           (list 'el/nreverse acc))))
 
@@ -1762,7 +1763,7 @@ The expansion returns a list of BODY's values."
 
 (cljbang--register-macro
  'cljbang-core-for
- (lambda (bindings body) (cljbang--for bindings body)))
+ (lambda (bindings &rest body) (cljbang--for bindings body)))
 
 (cljbang--register-macro
  'cljbang-core-dotimes
